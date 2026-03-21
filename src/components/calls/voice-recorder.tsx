@@ -104,7 +104,7 @@ export function VoiceRecorder({
     recognition.start();
     setRecording(true);
     setErrorMessage("");
-  }, [onTranscriptChange]);
+  }, [onTranscriptChange, recording]);
 
   const stopRecording = useCallback(() => {
     if (recognitionRef.current) {

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { createBrowserClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sprout } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -35,18 +36,66 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-green-50/80 via-background to-background px-4 py-12 dark:from-green-950/20 dark:via-background dark:to-background">
-      <div className="glass w-full max-w-[26rem] rounded-2xl px-8 py-10 shadow-lg shadow-black/[0.03] dark:shadow-black/[0.15] sm:px-10 sm:py-12">
-        <div className="stagger-enter space-y-8">
+    <div className="flex min-h-screen">
+      {/* Left panel — background image (hidden on mobile) */}
+      <div className="relative hidden lg:flex lg:w-1/2 xl:w-3/5">
+        <Image
+          src="/golf-sunset.jpg"
+          alt="Golf course at sunset"
+          fill
+          priority
+          className="object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/70" />
+        <div className="relative z-10 flex flex-col justify-end p-12">
+          <Image
+            src="/logo-allturf.png"
+            alt="Allturf"
+            width={200}
+            height={60}
+            className="mb-4"
+          />
+          <p className="max-w-md text-lg text-white/80">
+            Turf management &amp; sales platform for Ontario&apos;s golf courses.
+          </p>
+        </div>
+      </div>
+
+      {/* Mobile hero strip (visible on mobile only) */}
+      <div className="relative h-40 w-full lg:hidden">
+        <Image
+          src="/golf-sunset.jpg"
+          alt="Golf course at sunset"
+          fill
+          priority
+          className="object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/50 to-black/70" />
+        <div className="relative z-10 flex h-full items-center justify-center">
+          <Image
+            src="/logo-allturf.png"
+            alt="Allturf"
+            width={160}
+            height={48}
+          />
+        </div>
+      </div>
+
+      {/* Right panel — form */}
+      <div className="flex w-full flex-col items-center justify-center bg-background px-4 py-12 lg:w-1/2 xl:w-2/5">
+        <div className="w-full max-w-[26rem] space-y-8">
           {/* Logo & heading */}
           <div className="text-center">
-            <div
-              aria-hidden="true"
-              className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary shadow-md shadow-primary/25"
-            >
-              <Sprout className="h-8 w-8 text-primary-foreground" />
+            <div className="mx-auto mb-5 hidden lg:block">
+              <Image
+                src="/logo-allturf.png"
+                alt="Allturf"
+                width={180}
+                height={54}
+                className="mx-auto"
+              />
             </div>
-            <h1 className="mt-5 text-2xl font-semibold tracking-tight">
+            <h1 className="text-2xl font-semibold tracking-tight">
               Welcome back
             </h1>
             <p className="mt-1.5 text-[15px] text-muted-foreground">

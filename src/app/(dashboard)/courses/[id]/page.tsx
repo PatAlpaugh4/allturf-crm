@@ -33,6 +33,7 @@ import {
   Phone,
   Mail,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   DragDropContext,
@@ -1001,10 +1002,11 @@ function PhotosTab({ visits }: { visits: VisitReport[] }) {
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
       {allPhotos.map((photo, i) => (
         <div key={i} className="relative aspect-square rounded-lg overflow-hidden border bg-muted">
-          <img
+          <Image
             src={photo.url}
             alt={`Visit ${photo.visit_date}`}
-            className="h-full w-full object-cover"
+            fill
+            className="object-cover"
           />
           <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-2">
             <p className="text-xs text-white">{photo.visit_date}</p>
