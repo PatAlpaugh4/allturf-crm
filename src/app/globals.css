@@ -2,26 +2,198 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Allturf — green/earth tone light theme */
+    --background: 0 0% 98%;
+    --foreground: 240 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 10%;
+    --primary: 142 45% 35%;            /* Forest green #3D7A47 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 94%;
+    --secondary-foreground: 240 6% 25%;
+    --muted: 240 4% 94%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 4% 92%;
+    --accent-foreground: 240 10% 10%;
+    --destructive: 0 65% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 142 45% 35%;
+    --radius: 0.875rem;
+    --chart-1: 142 45% 35%;            /* Green */
+    --chart-2: 38 70% 50%;             /* Amber — seasonal */
+    --chart-3: 200 50% 45%;            /* Sky blue — weather */
+    --chart-4: 0 55% 50%;              /* Red — disease alerts */
+    --chart-5: 270 40% 50%;            /* Purple */
+  }
+
+  .dark {
+    --background: 150 10% 7%;           /* Dark green-black */
+    --foreground: 210 20% 94%;
+    --card: 150 8% 10%;
+    --card-foreground: 210 20% 94%;
+    --popover: 150 8% 10%;
+    --popover-foreground: 210 20% 94%;
+    --primary: 142 50% 45%;             /* Brighter green for dark */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 150 8% 16%;
+    --secondary-foreground: 210 15% 80%;
+    --muted: 150 8% 16%;
+    --muted-foreground: 150 6% 56%;
+    --accent: 150 8% 18%;
+    --accent-foreground: 210 20% 94%;
+    --destructive: 0 62% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 150 8% 16%;
+    --input: 150 8% 16%;
+    --ring: 142 50% 45%;
+    --radius: 0.875rem;
+    --chart-1: 142 50% 45%;
+    --chart-2: 38 65% 52%;
+    --chart-3: 200 45% 50%;
+    --chart-4: 0 50% 55%;
+    --chart-5: 270 35% 55%;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
 }
 
+/* Turf domain surface utilities */
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .surface-turf {
+    background: rgba(61, 122, 71, 0.06);
+  }
+  .surface-weather {
+    background: rgba(56, 145, 200, 0.06);
+  }
+  .surface-alert {
+    background: rgba(220, 60, 50, 0.06);
+  }
+  .surface-season {
+    background: rgba(210, 150, 40, 0.06);
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid hsl(240 6% 90%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  .dark .glass {
+    background: rgba(18, 20, 25, 0.85);
+    border: 1px solid hsl(150 8% 16%);
+  }
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, hsl(240 4% 94%) 25%, hsl(240 4% 90%) 50%, hsl(240 4% 94%) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius);
+}
+
+.dark .skeleton {
+  background: linear-gradient(90deg, hsl(150 8% 16%) 25%, hsl(150 8% 20%) 50%, hsl(150 8% 16%) 75%);
+  background-size: 200% 100%;
+}
+
+/* Page entrance — subtle */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Stagger children */
+@keyframes cardFadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.stagger-enter > * {
+  animation: cardFadeUp 0.35s ease-out both;
+}
+.stagger-enter > *:nth-child(1) { animation-delay: 0s; }
+.stagger-enter > *:nth-child(2) { animation-delay: 0.04s; }
+.stagger-enter > *:nth-child(3) { animation-delay: 0.08s; }
+.stagger-enter > *:nth-child(4) { animation-delay: 0.12s; }
+.stagger-enter > *:nth-child(5) { animation-delay: 0.16s; }
+.stagger-enter > *:nth-child(6) { animation-delay: 0.20s; }
+.stagger-enter > *:nth-child(7) { animation-delay: 0.24s; }
+.stagger-enter > *:nth-child(8) { animation-delay: 0.28s; }
+
+/* ===== Mobile field experience ===== */
+
+/* Touch targets — enforce 44px minimum on interactive elements at mobile viewports */
+@media (max-width: 768px) {
+  /* Buttons, links, checkboxes, selects */
+  button:not([data-no-touch-resize]),
+  [role="button"],
+  [role="checkbox"],
+  [role="tab"],
+  a[href] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Select triggers */
+  [role="combobox"] {
+    min-height: 44px;
+  }
+
+  /* Table row tap targets */
+  tbody tr {
+    min-height: 44px;
+  }
+
+  /* Larger text inputs on mobile for easier interaction */
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="email"],
+  input[type="tel"],
+  textarea,
+  select {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+}
+
+/* FAB pulse animation */
+@keyframes fab-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(61, 122, 71, 0.3); }
+  50% { box-shadow: 0 4px 20px rgba(61, 122, 71, 0.5); }
+}
+
+/* Hide scrollbar for snap-scroll containers on mobile */
+@media (max-width: 768px) {
+  .snap-x::-webkit-scrollbar {
+    display: none;
+  }
+  .snap-x {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
