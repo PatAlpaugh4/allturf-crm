@@ -111,42 +111,8 @@ function NavContent({ onLinkClick }: { onLinkClick?: () => void }) {
         </nav>
       </ScrollArea>
 
-      {/* Bottom section — user + scenic image */}
+      {/* Bottom section — scenic image with user overlay */}
       <div className="mt-auto">
-        {/* User info + sign out */}
-        {profile && (
-          <div className="mx-3 mb-3 flex items-center gap-2 rounded-lg border border-border/50 bg-accent/50 px-3 py-2.5">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-              {profile.full_name
-                ? profile.full_name
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")
-                    .slice(0, 2)
-                    .toUpperCase()
-                : profile.email[0].toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium leading-tight">
-                {profile.full_name || profile.email}
-              </p>
-              {profile.territory && (
-                <p className="truncate text-[11px] text-muted-foreground leading-tight">
-                  {profile.territory}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={signOut}
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-              title="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* Golf course sunset photo */}
         <div className="relative h-[220px] overflow-hidden rounded-t-xl">
           {/* Gradient overlay — blends photo into sidebar background */}
           <div className="absolute inset-0 z-10 bg-gradient-to-b from-card via-card/60 to-transparent dark:from-card dark:via-card/70 dark:to-transparent" />
@@ -158,6 +124,39 @@ function NavContent({ onLinkClick }: { onLinkClick?: () => void }) {
             className="object-cover object-center"
             sizes="240px"
           />
+
+          {/* User name + sign out overlaying bottom of image */}
+          {profile && (
+            <div className="absolute bottom-0 inset-x-0 z-20 flex items-center gap-2 bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-8">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-semibold text-white backdrop-blur-sm">
+                {profile.full_name
+                  ? profile.full_name
+                      .split(" ")
+                      .map((n) => n[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()
+                  : profile.email[0].toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium leading-tight text-white">
+                  {profile.full_name || profile.email}
+                </p>
+                {profile.territory && (
+                  <p className="truncate text-[11px] leading-tight text-white/70">
+                    {profile.territory}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={signOut}
+                className="shrink-0 rounded-md p-1 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
