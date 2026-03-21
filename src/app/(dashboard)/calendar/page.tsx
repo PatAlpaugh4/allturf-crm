@@ -575,7 +575,6 @@ export default function CalendarPage() {
           )}
           {view === "day" && (
             <DayView
-              currentDate={currentDate}
               events={eventsByDate.get(toDateStr(currentDate)) || []}
               onEventClick={setSelectedEvent}
               onSlotClick={(t) => openCreate(toDateStr(currentDate), t)}
@@ -792,9 +791,8 @@ function WeekView({
 // ---------------------------------------------------------------------------
 
 function DayView({
-  currentDate, events: dayEvents, onEventClick, onSlotClick,
+  events: dayEvents, onEventClick, onSlotClick,
 }: {
-  currentDate: Date;
   events: CalEvent[];
   onEventClick: (e: CalEvent) => void;
   onSlotClick: (time: string) => void;

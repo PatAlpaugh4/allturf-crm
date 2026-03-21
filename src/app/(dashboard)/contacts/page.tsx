@@ -59,7 +59,6 @@ import {
   CONTACT_ROLES,
   STATUS_COLORS,
   type ContactStatus,
-  type ContactRole,
   type Contact,
   type Activity,
 } from "@/lib/types";
