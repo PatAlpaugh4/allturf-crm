@@ -1037,6 +1037,14 @@ export interface CallLogExtraction {
   action_items: ActionItem[] | null;
   key_topics: string[] | null;
   confidence_score: number | null;
+  // A9: Richer extraction fields
+  extracted_contact_name: string | null;
+  extracted_company_name: string | null;
+  extracted_products_requested: string[] | null;
+  extracted_quantities: Array<{ product: string; quantity: number; unit: string | null }> | null;
+  extracted_commitments: Array<{ description: string; deadline: string | null; owner: string | null }> | null;
+  extracted_reorders: Array<{ product_name: string; quantity: number | null; unit: string | null; needed_by: string | null }> | null;
+  urgency_level: string | null;
   created_at: string;
   updated_at: string;
   // Optional joined relation

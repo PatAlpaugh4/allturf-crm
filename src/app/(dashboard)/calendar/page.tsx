@@ -45,7 +45,6 @@ import {
   Pencil,
   Brain,
   Truck,
-  Leaf,
   Users,
 } from "lucide-react";
 import { EVENT_TYPES, type EventType } from "@/lib/types";
@@ -1015,11 +1014,6 @@ function EventDetail({
         {event.source === "delivery" && (
           <Button size="sm" variant="outline" className="gap-1.5" asChild>
             <Link href="/pipeline"><Truck className="h-3.5 w-3.5" />View Deal</Link>
-          </Button>
-        )}
-        {event.source === "treatment" && (
-          <Button size="sm" variant="outline" className="gap-1.5" asChild>
-            <Link href="/programs"><Leaf className="h-3.5 w-3.5" />View Program</Link>
           </Button>
         )}
         {event.source === "follow_up" && (

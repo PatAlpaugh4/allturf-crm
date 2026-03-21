@@ -62,6 +62,19 @@ interface LLMExtraction {
   confidence_score: number;
   contact_names: string[];
   company_names: string[];
+  // A9: Richer extraction fields
+  commitments: Array<{
+    description: string;
+    deadline: string | null;
+    owner: string | null;
+  }>;
+  reorders: Array<{
+    product_name: string;
+    quantity: number | null;
+    unit: string | null;
+    needed_by: string | null;
+  }>;
+  urgency_level: "routine" | "soon" | "urgent" | "emergency";
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +82,10 @@ interface LLMExtraction {
 // ---------------------------------------------------------------------------
 
 const EXTRACTION_TASK_PROMPT = `You are analyzing a sales rep's call notes or voice dictation from a turf products distributor.
+These transcripts are often conversational dictations recorded from a vehicle — expect informal language,
+partial sentences, and patterns like "Just left [course]", "Talked to [name]", "They need [product]",
+"He said he'd [commitment]", "Gotta send [action] by [date]".
+
 Extract structured intelligence from the transcript.
 
 Respond in JSON with this exact schema:
@@ -85,16 +102,22 @@ Respond in JSON with this exact schema:
   "action_items": [{"type": "send_quote|schedule_visit|send_sample|follow_up_call|check_inventory|order_product|other", "description": "string", "due_date": "YYYY-MM-DD|null", "priority": "low|medium|high|urgent"}],
   "key_topics": ["string — main themes discussed"],
   "confidence_score": 0.0-1.0,
-  "contact_names": ["string — person names mentioned"],
-  "company_names": ["string — golf course or company names mentioned"]
+  "contact_names": ["string — person names mentioned (first name, last name, or both)"],
+  "company_names": ["string — golf course or company names mentioned"],
+  "commitments": [{"description": "string — what was promised or agreed to", "deadline": "YYYY-MM-DD|null", "owner": "rep|customer|null — who owns the commitment"}],
+  "reorders": [{"product_name": "string", "quantity": null, "unit": null, "needed_by": "YYYY-MM-DD|null"}],
+  "urgency_level": "routine|soon|urgent|emergency"
 }
 
 Rules:
 - Only include items explicitly mentioned or strongly implied in the transcript.
 - Do not invent or assume information not present.
 - Set confidence_score lower (< 0.5) if the transcript is garbled, very short, or ambiguous.
-- For follow_up_date, convert relative dates (e.g., "Friday") using today's date context.
-- Include all product names even if only briefly mentioned.`;
+- For follow_up_date, deadlines, and needed_by dates, convert relative dates (e.g., "Friday", "next week", "end of month") using today's date context.
+- Include all product names even if only briefly mentioned.
+- "commitments" are promises or agreements made during the conversation (e.g., "I'll send a quote", "He agreed to trial", "She wants a demo next week").
+- "reorders" are repeat/refill product requests — the customer has ordered before and needs more (e.g., "running low on Banner", "need another pallet of Primo").
+- "urgency_level": routine = standard follow-up, soon = within a few days, urgent = needs attention today, emergency = crop/turf at risk.`;
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -274,9 +297,32 @@ export async function processCallLog(callLogId: string): Promise<ProcessingResul
       action_items: actionItems,
       key_topics: extraction.key_topics,
       confidence_score: Math.max(0, Math.min(1, extraction.confidence_score)),
+      extracted_contact_name: extraction.contact_names[0] || null,
+      extracted_company_name: extraction.company_names[0] || null,
+      extracted_products_requested: extraction.products_requested.map((p) => p.product_name),
+      extracted_quantities: extraction.products_requested
+        .filter((p) => p.quantity != null)
+        .map((p) => ({ product: p.product_name, quantity: p.quantity, unit: p.unit })),
+      extracted_commitments: extraction.commitments,
+      extracted_reorders: extraction.reorders,
+      urgency_level: extraction.urgency_level,
     })
     .select("id")
     .single();
+
+  // Step 5: Demand signal generation (non-fatal)
+  try {
+    await generateDemandSignals({
+      callLogId,
+      repId: callLog.rep_id,
+      companyId: effectiveCompanyId,
+      extraction,
+      matchedProducts,
+      supabase,
+    });
+  } catch (err) {
+    warnings.push(`Demand signal generation failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // Update call_log to completed
   await supabase
@@ -319,6 +365,9 @@ async function extractFromTranscript(transcript: string): Promise<LLMExtraction>
   const parsed = JSON.parse(raw);
 
   // Defensive structure validation with defaults
+  const VALID_URGENCY_LEVELS = ["routine", "soon", "urgent", "emergency"] as const;
+  const rawUrgency = typeof parsed.urgency_level === "string" ? parsed.urgency_level : "routine";
+
   return {
     summary: typeof parsed.summary === "string" ? parsed.summary : "",
     sentiment: parsed.sentiment || "neutral",
@@ -334,6 +383,11 @@ async function extractFromTranscript(transcript: string): Promise<LLMExtraction>
     confidence_score: typeof parsed.confidence_score === "number" ? parsed.confidence_score : 0.5,
     contact_names: Array.isArray(parsed.contact_names) ? parsed.contact_names : [],
     company_names: Array.isArray(parsed.company_names) ? parsed.company_names : [],
+    commitments: Array.isArray(parsed.commitments) ? parsed.commitments : [],
+    reorders: Array.isArray(parsed.reorders) ? parsed.reorders : [],
+    urgency_level: (VALID_URGENCY_LEVELS as readonly string[]).includes(rawUrgency)
+      ? (rawUrgency as LLMExtraction["urgency_level"])
+      : "routine",
   };
 }
 
@@ -383,7 +437,7 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
   }
 
   function canAddNudge(type: NudgeType): boolean {
-    return (existingCounts.get(type) || 0) < 3 && nudges.length < 5;
+    return (existingCounts.get(type) || 0) < 5 && nudges.length < 10;
   }
 
   // Determine priority based on sentiment and follow-up urgency
@@ -566,6 +620,226 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
     }
   }
 
+  // 7. Promo check — if a mentioned/requested product has an active promotion
+  const today = new Date().toISOString().split("T")[0];
+  const allMentionedProductIds = new Set<string>();
+  for (const pr of extraction.products_requested) {
+    const m = matchedProducts.get(pr.product_name);
+    if (m) allMentionedProductIds.add(m.id);
+  }
+  for (const name of extraction.products_mentioned) {
+    const m = matchedProducts.get(name);
+    if (m) allMentionedProductIds.add(m.id);
+  }
+
+  if (allMentionedProductIds.size > 0 && canAddNudge("promo_available")) {
+    const { data: activePromos } = await supabase
+      .from("promotions")
+      .select("*, product:offerings(id, name)")
+      .eq("active", true)
+      .gte("end_date", today)
+      .lte("start_date", today);
+
+    if (activePromos) {
+      for (const promo of activePromos) {
+        if (!canAddNudge("promo_available")) break;
+        // Match: promo is for a specific product that was mentioned, or promo is for all products (product_id is null)
+        const isRelevant = !promo.product_id || allMentionedProductIds.has(promo.product_id);
+        if (!isRelevant) continue;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const productName = (promo as any).product?.name || "Multiple products";
+        const contactLabel = extraction.contact_names[0] || "the superintendent";
+        const courseLabel = extraction.company_names[0] || "this course";
+
+        // Build discount label
+        let discountLabel = "";
+        if (promo.discount_value != null) {
+          if (promo.discount_type === "percentage") discountLabel = ` — ${promo.discount_value}% off`;
+          else if (promo.discount_type === "fixed_amount") discountLabel = ` — $${promo.discount_value} off`;
+          else if (promo.discount_type === "volume_pricing") discountLabel = " — volume pricing";
+          else if (promo.discount_type === "bundle") discountLabel = " — bundle deal";
+        }
+
+        const minQtyNote = promo.min_quantity ? ` for orders over ${promo.min_quantity} units` : "";
+        const message = `${productName} is currently${discountLabel}${minQtyNote} (ends ${promo.end_date}).${promo.description ? ` ${promo.description}` : ""} Mention this to ${contactLabel} at ${courseLabel}.`;
+
+        nudges.push({
+          rep_id: callLog.rep_id,
+          company_id: callLog.company_id,
+          contact_id: callLog.contact_id,
+          call_log_id: callLog.id,
+          nudge_type: "promo_available",
+          priority: "high",
+          title: `${promo.title}${discountLabel}`,
+          message,
+          suggested_action: `Offer the ${productName} promotion to ${contactLabel}.`,
+          due_date: promo.end_date,
+        });
+      }
+    }
+  }
+
+  // 8. Cross-rep disease intelligence — if 2+ other reps reported same disease in 72hrs
+  for (const diseaseName of extraction.diseases_mentioned) {
+    if (!canAddNudge("disease_alert")) break;
+    const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+
+    const { data: recentMentions } = await supabase
+      .from("call_log_extractions")
+      .select(`
+        call_log_id,
+        products_mentioned,
+        call_log:call_logs!inner(rep_id, company_id, rep:user_profiles(full_name), company:companies(name))
+      `)
+      .contains("diseases_mentioned", [diseaseName])
+      .gt("created_at", cutoff)
+      .neq("call_log.rep_id", callLog.rep_id)
+      .limit(5);
+
+    if (recentMentions && recentMentions.length >= 2) {
+      const repDetails = recentMentions.slice(0, 3).map((m) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cl = m.call_log as any;
+        const repName = cl?.rep?.full_name || "A rep";
+        const courseName = cl?.company?.name || "a course";
+        const product = m.products_mentioned?.[0] || null;
+        return product
+          ? `${repName} at ${courseName} used ${product}`
+          : `${repName} at ${courseName}`;
+      });
+
+      nudges.push({
+        rep_id: callLog.rep_id,
+        company_id: callLog.company_id,
+        contact_id: callLog.contact_id,
+        call_log_id: callLog.id,
+        nudge_type: "disease_alert",
+        priority: "high",
+        title: `${recentMentions.length + 1} reps reported ${diseaseName} this week`,
+        message: `${diseaseName} is trending in the region. ${repDetails.join(". ")}. Recommend checking with your accounts.`,
+        suggested_action: `Proactively ask your accounts about ${diseaseName} conditions.`,
+        due_date: null,
+      });
+    }
+  }
+
+  // 9. Related product suggestion — disease discussed but top product not mentioned
+  for (const diseaseName of extraction.diseases_mentioned) {
+    if (!canAddNudge("cross_sell")) break;
+    const diseaseMatch = matchedDiseases.get(diseaseName);
+    if (!diseaseMatch) continue;
+
+    const { data: topProducts } = await supabase
+      .from("product_disease_links")
+      .select("product:offerings!inner(id, name, pcp_registration_number, ontario_class)")
+      .eq("disease_pest_id", diseaseMatch.id)
+      .eq("offerings.is_active", true)
+      .not("offerings.ontario_class", "is", null)
+      .limit(1);
+
+    if (topProducts && topProducts.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const topProduct = (topProducts[0] as any).product as {
+        id: string;
+        name: string;
+        pcp_registration_number: string | null;
+      };
+
+      // Only suggest if the product wasn't already mentioned
+      const alreadyMentioned = extraction.products_mentioned.some(
+        (p) => p.toLowerCase() === topProduct.name.toLowerCase()
+      );
+      if (!alreadyMentioned && callLog.company_id) {
+        // Check if this course has purchased this product this season
+        const yearStart = `${new Date().getFullYear()}-01-01`;
+        const { data: purchases } = await supabase
+          .from("deal_items")
+          .select("id, deal:deals!inner(company_id, stage)")
+          .eq("deals.company_id", callLog.company_id)
+          .eq("offering_id", topProduct.id)
+          .in("deals.stage", ["Paid", "Order Placed"])
+          .gt("created_at", yearStart)
+          .limit(1);
+
+        if (!purchases || purchases.length === 0) {
+          const courseLabel = extraction.company_names[0] || "this course";
+          nudges.push({
+            rep_id: callLog.rep_id,
+            company_id: callLog.company_id,
+            contact_id: callLog.contact_id,
+            call_log_id: callLog.id,
+            nudge_type: "cross_sell",
+            priority: "medium",
+            title: `Consider ${topProduct.name} for ${diseaseName}`,
+            message: `${topProduct.name}${topProduct.pcp_registration_number ? ` (PCP# ${topProduct.pcp_registration_number})` : ""} is rated for ${diseaseName} and ${courseLabel} hasn't purchased it this season.`,
+            suggested_action: `Discuss ${topProduct.name} as a treatment option for ${diseaseName}.`,
+            due_date: null,
+          });
+        }
+      }
+    }
+  }
+
+  // 10. Reorders → inventory_alert
+  for (const reorder of extraction.reorders) {
+    if (!canAddNudge("inventory_alert")) break;
+    const matched = matchedProducts.get(reorder.product_name);
+    nudges.push({
+      rep_id: callLog.rep_id,
+      company_id: callLog.company_id,
+      contact_id: callLog.contact_id,
+      call_log_id: callLog.id,
+      nudge_type: "inventory_alert",
+      priority: reorder.needed_by ? "high" : "medium",
+      title: `Reorder: ${reorder.product_name}`,
+      message: `${reorder.product_name} reorder requested${reorder.quantity ? ` — ${reorder.quantity} ${reorder.unit || "units"}` : ""}${reorder.needed_by ? `. Needed by ${reorder.needed_by}` : ""}.${matched?.pcp_registration_number ? ` PCP# ${matched.pcp_registration_number}` : ""}`,
+      suggested_action: "Check inventory and process reorder.",
+      due_date: reorder.needed_by || null,
+    });
+  }
+
+  // 11. Commitments with deadlines → action_reminder
+  for (const commitment of extraction.commitments) {
+    if (!canAddNudge("action_reminder")) break;
+    if (commitment.owner === "customer") continue;
+
+    const contactLabel = extraction.contact_names[0] || null;
+    const courseLabel = extraction.company_names[0] || null;
+    const contextSuffix = contactLabel && courseLabel
+      ? ` — ${contactLabel} at ${courseLabel}`
+      : contactLabel ? ` — ${contactLabel}` : courseLabel ? ` — ${courseLabel}` : "";
+
+    nudges.push({
+      rep_id: callLog.rep_id,
+      company_id: callLog.company_id,
+      contact_id: callLog.contact_id,
+      call_log_id: callLog.id,
+      nudge_type: "action_reminder",
+      priority: commitment.deadline ? "high" : "medium",
+      title: `You promised: ${commitment.description.slice(0, 50)}`,
+      message: commitment.description + contextSuffix + (commitment.deadline ? ` (Due: ${commitment.deadline})` : ""),
+      suggested_action: commitment.description,
+      due_date: commitment.deadline || null,
+    });
+  }
+
+  // 12. Urgent dictations → elevated priority nudge
+  if (extraction.urgency_level === "emergency" && canAddNudge("action_reminder")) {
+    nudges.push({
+      rep_id: callLog.rep_id,
+      company_id: callLog.company_id,
+      contact_id: callLog.contact_id,
+      call_log_id: callLog.id,
+      nudge_type: "action_reminder",
+      priority: "urgent",
+      title: "Emergency flagged in call",
+      message: `This call was flagged as emergency-level urgency. ${extraction.summary.slice(0, 200)}`,
+      suggested_action: "Review and act immediately.",
+      due_date: new Date().toISOString().split("T")[0],
+    });
+  }
+
   // Insert nudges
   if (nudges.length > 0) {
     await supabase.from("rep_nudges").insert(nudges);
@@ -604,6 +878,94 @@ async function createActivity(params: {
   }
 
   return data.id;
+}
+
+// ---------------------------------------------------------------------------
+// Step 5: Demand signal generation
+// ---------------------------------------------------------------------------
+
+async function generateDemandSignals(params: {
+  callLogId: string;
+  repId: string;
+  companyId: string | null;
+  extraction: LLMExtraction;
+  matchedProducts: Map<string, { id: string; pcp_registration_number: string | null }>;
+  supabase: ReturnType<typeof createServiceClient>;
+}): Promise<void> {
+  const { callLogId, repId, companyId, extraction, matchedProducts, supabase } = params;
+
+  // Look up rep territory for region tagging
+  const { data: repProfile } = await supabase
+    .from("user_profiles")
+    .select("territory")
+    .eq("id", repId)
+    .single();
+  const region = repProfile?.territory || null;
+
+  const signals: Array<{
+    product_id: string | null;
+    product_name: string;
+    signal_type: string;
+    source_call_log_id: string;
+    source_rep_id: string;
+    company_id: string | null;
+    quantity_mentioned: number | null;
+    region: string | null;
+  }> = [];
+
+  // Products requested → "request" signal
+  for (const pr of extraction.products_requested) {
+    const matched = matchedProducts.get(pr.product_name);
+    signals.push({
+      product_id: matched?.id || null,
+      product_name: pr.product_name,
+      signal_type: "request",
+      source_call_log_id: callLogId,
+      source_rep_id: repId,
+      company_id: companyId,
+      quantity_mentioned: pr.quantity,
+      region,
+    });
+  }
+
+  // Reorders → "reorder" signal
+  for (const ro of extraction.reorders) {
+    const matched = matchedProducts.get(ro.product_name);
+    signals.push({
+      product_id: matched?.id || null,
+      product_name: ro.product_name,
+      signal_type: "reorder",
+      source_call_log_id: callLogId,
+      source_rep_id: repId,
+      company_id: companyId,
+      quantity_mentioned: ro.quantity,
+      region,
+    });
+  }
+
+  // Products mentioned (but not requested) → "inquiry" signal
+  for (const name of extraction.products_mentioned) {
+    // Skip if already covered by a request or reorder
+    const alreadySignaled = signals.some(
+      (s) => s.product_name.toLowerCase() === name.toLowerCase(),
+    );
+    if (alreadySignaled) continue;
+    const matched = matchedProducts.get(name);
+    signals.push({
+      product_id: matched?.id || null,
+      product_name: name,
+      signal_type: "inquiry",
+      source_call_log_id: callLogId,
+      source_rep_id: repId,
+      company_id: companyId,
+      quantity_mentioned: null,
+      region,
+    });
+  }
+
+  if (signals.length > 0) {
+    await supabase.from("demand_signals").insert(signals);
+  }
 }
 
 // ---------------------------------------------------------------------------

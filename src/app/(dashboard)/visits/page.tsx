@@ -4,12 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -17,12 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -43,18 +34,13 @@ import {
   List,
   Plus,
   MapPin,
-  Brain,
   ChevronLeft,
   ChevronRight,
-  AlertTriangle,
-  CheckCircle2,
   Clock,
 } from "lucide-react";
 import {
-  CONDITION_RATINGS,
   CONDITION_COLORS,
   type ConditionRating,
-  type VisitBriefing,
 } from "@/lib/types";
 import { VoiceInput } from "@/components/voice-input";
 import { PhotoCapture } from "@/components/photo-capture";
@@ -72,13 +58,6 @@ interface VisitRow {
   rep_name: string | null;
   observations: string | null;
   follow_up_date: string | null;
-  disease_count: number;
-}
-
-interface DiseasePestOption {
-  id: string;
-  name: string;
-  type: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +84,8 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const VISIT_TYPES = ["Routine", "Follow-up", "Demo", "Emergency"] as const;
+
 // ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
@@ -117,91 +98,58 @@ export default function VisitsPage() {
 
   // Post-visit form
   const [showReport, setShowReport] = useState(false);
-  // Briefing
-  const [briefingOpen, setBriefingOpen] = useState(false);
-  const [briefingLoading, setBriefingLoading] = useState(false);
-  const [briefing, setBriefing] = useState<VisitBriefing | null>(null);
 
-  // Courses for dropdowns
+  // Courses and contacts for dropdowns
   const [courses, setCourses] = useState<Array<{ id: string; name: string }>>([]);
-  // Disease/pest options
-  const [diseasePests, setDiseasePests] = useState<DiseasePestOption[]>([]);
+  const [contacts, setContacts] = useState<Array<{ id: string; first_name: string; last_name: string; company_id: string | null }>>([]);
 
   const supabase = createBrowserClient();
 
+  const fetchVisits = useCallback(async () => {
+    const { data } = await supabase
+      .from("visit_reports")
+      .select(`
+        id, visit_date, overall_condition, observations, follow_up_date,
+        company_id,
+        company:companies(name),
+        rep:user_profiles(full_name)
+      `)
+      .order("visit_date", { ascending: false });
+
+    if (data) {
+      const rows: VisitRow[] = data.map((v) => {
+        const company = v.company as unknown as { name: string } | null;
+        const rep = v.rep as unknown as { full_name: string | null } | null;
+        return {
+          id: v.id,
+          visit_date: v.visit_date,
+          overall_condition: v.overall_condition as ConditionRating | null,
+          company_name: company?.name ?? null,
+          company_id: v.company_id,
+          rep_name: rep?.full_name ?? null,
+          observations: v.observations,
+          follow_up_date: v.follow_up_date,
+        };
+      });
+      setVisits(rows);
+    }
+  }, [supabase]);
+
   useEffect(() => {
     async function load() {
-      const [visitsRes, coursesRes, dpRes] = await Promise.all([
-        supabase
-          .from("visit_reports")
-          .select(`
-            id, visit_date, overall_condition, observations, follow_up_date,
-            company_id,
-            company:companies(name),
-            rep:user_profiles(full_name),
-            visit_observations(id)
-          `)
-          .order("visit_date", { ascending: false }),
+      const [, coursesRes, contactsRes] = await Promise.all([
+        fetchVisits(),
         supabase.from("companies").select("id, name").order("name"),
-        supabase
-          .from("turf_diseases_pests")
-          .select("id, name, type")
-          .order("name"),
+        supabase.from("contacts").select("id, first_name, last_name, company_id").order("last_name"),
       ]);
 
-      if (visitsRes.data) {
-        const rows: VisitRow[] = visitsRes.data.map((v) => {
-          const company = v.company as unknown as { name: string } | null;
-          const rep = v.rep as unknown as { full_name: string | null } | null;
-          const obs = v.visit_observations as unknown as Array<{ id: string }> | null;
-          return {
-            id: v.id,
-            visit_date: v.visit_date,
-            overall_condition: v.overall_condition as ConditionRating | null,
-            company_name: company?.name ?? null,
-            company_id: v.company_id,
-            rep_name: rep?.full_name ?? null,
-            observations: v.observations,
-            follow_up_date: v.follow_up_date,
-            disease_count: obs?.length ?? 0,
-          };
-        });
-        setVisits(rows);
-      }
-
       if (coursesRes.data) setCourses(coursesRes.data);
-      if (dpRes.data) setDiseasePests(dpRes.data);
+      if (contactsRes.data) setContacts(contactsRes.data as Array<{ id: string; first_name: string; last_name: string; company_id: string | null }>);
 
       setLoading(false);
     }
     load();
-  }, [supabase]);
-
-  // Visit briefing
-  const requestBriefing = useCallback(
-    async (courseId: string) => {
-      setBriefingOpen(true);
-      setBriefingLoading(true);
-      setBriefing(null);
-
-      try {
-        const res = await fetch("/api/turf/visit-prep", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ course_id: courseId }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setBriefing(data);
-        }
-      } catch {
-        // silently fail
-      } finally {
-        setBriefingLoading(false);
-      }
-    },
-    []
-  );
+  }, [supabase, fetchVisits]);
 
   // Calendar visit map
   const visitsByDate = useMemo(() => {
@@ -367,11 +315,9 @@ export default function VisitsPage() {
               <TableRow>
                 <TableHead>Date</TableHead>
                 <TableHead>Course</TableHead>
-                <TableHead className="hidden md:table-cell">Condition</TableHead>
-                <TableHead className="hidden lg:table-cell">Diseases Found</TableHead>
+                <TableHead className="hidden md:table-cell">Notes</TableHead>
                 <TableHead className="hidden md:table-cell">Follow-up</TableHead>
                 <TableHead className="hidden xl:table-cell">Rep</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -384,21 +330,12 @@ export default function VisitsPage() {
                     <p className="font-medium">{v.company_name || "—"}</p>
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
-                    {v.overall_condition ? (
-                      <Badge className={`text-[10px] ${CONDITION_COLORS[v.overall_condition]}`}>
-                        {v.overall_condition}
-                      </Badge>
+                    {v.observations ? (
+                      <p className="text-sm text-muted-foreground truncate max-w-[300px]">
+                        {v.observations}
+                      </p>
                     ) : (
                       <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell">
-                    {v.disease_count > 0 ? (
-                      <Badge variant="outline" className="text-[10px] h-4">
-                        {v.disease_count} issue{v.disease_count !== 1 ? "s" : ""}
-                      </Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">None</span>
                     )}
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
@@ -414,24 +351,11 @@ export default function VisitsPage() {
                   <TableCell className="hidden xl:table-cell text-sm text-muted-foreground">
                     {v.rep_name || "—"}
                   </TableCell>
-                  <TableCell className="text-right">
-                    {v.company_id && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1 text-xs"
-                        onClick={() => requestBriefing(v.company_id!)}
-                      >
-                        <Brain className="h-3 w-3" />
-                        Briefing
-                      </Button>
-                    )}
-                  </TableCell>
                 </TableRow>
               ))}
               {visits.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                     No visit reports yet
                   </TableCell>
                 </TableRow>
@@ -441,136 +365,19 @@ export default function VisitsPage() {
         </div>
       )}
 
-      {/* Briefing Sheet */}
-      <Sheet open={briefingOpen} onOpenChange={setBriefingOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5 text-primary" />
-              Pre-Visit Briefing
-            </SheetTitle>
-          </SheetHeader>
-
-          {briefingLoading && (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-sm text-muted-foreground">
-                Generating briefing...
-              </span>
-            </div>
-          )}
-
-          {briefing && !briefingLoading && (
-            <div className="mt-4 space-y-4">
-              <div>
-                <h3 className="font-semibold">{briefing.company_name}</h3>
-                {briefing.superintendent_name && (
-                  <p className="text-sm text-muted-foreground">
-                    Superintendent: {briefing.superintendent_name}
-                  </p>
-                )}
-                <p className="text-sm mt-1">{briefing.course_profile_summary}</p>
-              </div>
-
-              <Separator />
-
-              {/* Weather */}
-              {briefing.recent_weather && (
-                <div>
-                  <h4 className="text-sm font-medium mb-1">Recent Weather</h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>Avg Temp: {briefing.recent_weather.avg_temp_c ?? "—"}°C</div>
-                    <div>Rainfall: {briefing.recent_weather.total_rainfall_mm ?? "—"}mm</div>
-                    <div>GDD: {briefing.recent_weather.gdd_cumulative ?? "—"}</div>
-                    <div>
-                      Spray Window:{" "}
-                      {briefing.recent_weather.is_spray_window ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 inline text-green-600" />
-                      ) : (
-                        <AlertTriangle className="h-3.5 w-3.5 inline text-orange-500" />
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Active issues */}
-              {briefing.active_issues.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium mb-1">Active Issues</h4>
-                  <div className="space-y-1">
-                    {briefing.active_issues.map((issue, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm">
-                        <Badge variant="outline" className="text-[10px] h-4">
-                          {issue.type}
-                        </Badge>
-                        <span>{issue.issue_name}</span>
-                        <span className="text-muted-foreground">— {issue.severity}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* MOA alerts */}
-              {briefing.moa_rotation_alerts.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium mb-1 flex items-center gap-1 text-orange-600">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    MOA Rotation Alerts
-                  </h4>
-                  <ul className="text-sm space-y-0.5 list-disc list-inside text-muted-foreground">
-                    {briefing.moa_rotation_alerts.map((a, idx) => (
-                      <li key={idx}>{a}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Talking points */}
-              {briefing.suggested_talking_points.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium mb-1">Suggested Talking Points</h4>
-                  <ul className="text-sm space-y-0.5 list-disc list-inside text-muted-foreground">
-                    {briefing.suggested_talking_points.map((tp, idx) => (
-                      <li key={idx}>{tp}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Upcoming deliveries */}
-              {briefing.upcoming_deliveries.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium mb-1">Upcoming Deliveries</h4>
-                  <div className="space-y-1">
-                    {briefing.upcoming_deliveries.map((del, idx) => (
-                      <div key={idx} className="text-sm flex justify-between">
-                        <span>{del.deal_name}</span>
-                        <span className="text-muted-foreground">{del.scheduled_date}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      {/* Post-Visit Report Dialog */}
+      {/* New Visit Report Dialog */}
       <Dialog open={showReport} onOpenChange={setShowReport}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Visit Report</DialogTitle>
           </DialogHeader>
-          <PostVisitForm
+          <VisitForm
             courses={courses}
-            diseasePests={diseasePests}
+            contacts={contacts}
             supabase={supabase}
             onSaved={() => {
               setShowReport(false);
-              window.location.reload();
+              fetchVisits();
             }}
           />
         </DialogContent>
@@ -583,81 +390,48 @@ export default function VisitsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Post-Visit Report Form
+// Simplified Visit Form — capture is king
 // ---------------------------------------------------------------------------
-function PostVisitForm({
+function VisitForm({
   courses,
-  diseasePests,
+  contacts,
   supabase,
   onSaved,
 }: {
   courses: Array<{ id: string; name: string }>;
-  diseasePests: DiseasePestOption[];
+  contacts: Array<{ id: string; first_name: string; last_name: string; company_id: string | null }>;
   supabase: ReturnType<typeof createBrowserClient>;
   onSaved: () => void;
 }) {
   const [courseId, setCourseId] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [visitType, setVisitType] = useState("Routine");
   const [visitDate, setVisitDate] = useState(new Date().toISOString().split("T")[0]);
-  const [overall, setOverall] = useState<ConditionRating | "">("");
-  const [greens, setGreens] = useState<ConditionRating | "">("");
-  const [fairways, setFairways] = useState<ConditionRating | "">("");
-  const [tees, setTees] = useState<ConditionRating | "">("");
-  const [rough, setRough] = useState<ConditionRating | "">("");
-  const [tempC, setTempC] = useState("");
-  const [humidity, setHumidity] = useState("");
-  const [rainfall, setRainfall] = useState("");
   const [observations, setObservations] = useState("");
-  const [recommendations, setRecommendations] = useState("");
-  const [followUpActions, setFollowUpActions] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
-  const [selectedDiseases, setSelectedDiseases] = useState<Set<string>>(new Set());
   const [photos, setPhotos] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const toggleDisease = (id: string) => {
-    setSelectedDiseases((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  // Filter contacts by selected course
+  const filteredContacts = courseId
+    ? contacts.filter((c) => c.company_id === courseId)
+    : contacts;
 
   const handleSave = async () => {
     if (!courseId || !visitDate) return;
     setSaving(true);
 
-    // Insert visit report
-    const { data: report } = await supabase
+    await supabase
       .from("visit_reports")
       .insert({
         company_id: courseId,
+        contact_id: contactId || null,
         visit_date: visitDate,
-        overall_condition: overall || null,
-        greens_condition: greens || null,
-        fairways_condition: fairways || null,
-        tees_condition: tees || null,
-        rough_condition: rough || null,
-        temperature_c: tempC ? parseFloat(tempC) : null,
-        humidity_percent: humidity ? parseFloat(humidity) : null,
-        recent_rainfall_mm: rainfall ? parseFloat(rainfall) : null,
+        visit_type: visitType,
         observations: observations || null,
-        recommendations: recommendations || null,
-        follow_up_actions: followUpActions || null,
         follow_up_date: followUpDate || null,
         photo_urls: photos.length > 0 ? photos.map((f) => f.name) : null,
-      })
-      .select("id")
-      .single();
-
-    // Insert observations for each selected disease/pest
-    if (report && selectedDiseases.size > 0) {
-      const obsRows = Array.from(selectedDiseases).map((dpId) => ({
-        visit_report_id: report.id,
-        disease_pest_id: dpId,
-      }));
-      await supabase.from("visit_observations").insert(obsRows);
-    }
+      });
 
     setSaving(false);
     onSaved();
@@ -665,11 +439,11 @@ function PostVisitForm({
 
   return (
     <div className="space-y-4">
-      {/* Course & Date */}
+      {/* Course & Contact */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>Course</Label>
-          <Select value={courseId} onValueChange={setCourseId}>
+          <Select value={courseId} onValueChange={(val) => { setCourseId(val); setContactId(""); }}>
             <SelectTrigger className="min-h-[44px]">
               <SelectValue placeholder="Select course" />
             </SelectTrigger>
@@ -683,100 +457,53 @@ function PostVisitForm({
           </Select>
         </div>
         <div>
-          <Label>Visit Date</Label>
+          <Label>Contact</Label>
+          <Select value={contactId} onValueChange={setContactId}>
+            <SelectTrigger className="min-h-[44px]">
+              <SelectValue placeholder="Select contact (optional)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">None</SelectItem>
+              {filteredContacts.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.first_name} {c.last_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Visit Type & Date */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label>Visit Type</Label>
+          <Select value={visitType} onValueChange={setVisitType}>
+            <SelectTrigger className="min-h-[44px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {VISIT_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Date</Label>
           <Input
             type="date"
             value={visitDate}
             onChange={(e) => setVisitDate(e.target.value)}
+            className="min-h-[44px]"
           />
         </div>
       </div>
 
-      <Separator />
-
-      {/* Condition Ratings */}
-      <div>
-        <Label className="text-sm font-medium">Condition Ratings</Label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-          <ConditionSelect label="Overall" value={overall} onChange={setOverall} />
-          <ConditionSelect label="Greens" value={greens} onChange={setGreens} />
-          <ConditionSelect label="Fairways" value={fairways} onChange={setFairways} />
-          <ConditionSelect label="Tees" value={tees} onChange={setTees} />
-          <ConditionSelect label="Rough" value={rough} onChange={setRough} />
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Weather */}
-      <div className="grid grid-cols-3 sm:grid-cols-3 gap-3">
-        <div>
-          <Label>Temp (°C)</Label>
-          <Input
-            type="number"
-            value={tempC}
-            onChange={(e) => setTempC(e.target.value)}
-            placeholder="—"
-          />
-        </div>
-        <div>
-          <Label>Humidity (%)</Label>
-          <Input
-            type="number"
-            value={humidity}
-            onChange={(e) => setHumidity(e.target.value)}
-            placeholder="—"
-          />
-        </div>
-        <div>
-          <Label>Rainfall (mm)</Label>
-          <Input
-            type="number"
-            value={rainfall}
-            onChange={(e) => setRainfall(e.target.value)}
-            placeholder="—"
-          />
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Disease/Pest Checkboxes */}
-      <div>
-        <Label className="text-sm font-medium">Diseases / Pests Observed</Label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5 mt-2 max-h-[200px] overflow-y-auto">
-          {diseasePests.map((dp) => (
-            <label
-              key={dp.id}
-              className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-2 py-2 hover:bg-accent/50 active:bg-accent min-h-[44px]"
-            >
-              <Checkbox
-                checked={selectedDiseases.has(dp.id)}
-                onCheckedChange={() => toggleDisease(dp.id)}
-              />
-              <span className="truncate">{dp.name}</span>
-              <Badge variant="outline" className="text-[8px] h-3.5 ml-auto flex-shrink-0">
-                {dp.type}
-              </Badge>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Photos */}
-      <div>
-        <Label className="mb-2 block">Photos</Label>
-        <PhotoCapture photos={photos} onPhotosChange={setPhotos} />
-      </div>
-
-      <Separator />
-
-      {/* Notes */}
+      {/* Notes — the main event */}
       <div>
         <div className="flex items-center justify-between">
-          <Label>Observations</Label>
+          <Label>Notes</Label>
           <VoiceInput
             onTranscript={(text) => setObservations((prev) => (prev ? `${prev} ${text}` : text))}
           />
@@ -784,55 +511,37 @@ function PostVisitForm({
         <Textarea
           value={observations}
           onChange={(e) => setObservations(e.target.value)}
-          placeholder="Describe what you observed on the course..."
-          rows={3}
+          placeholder="Dictate or type everything — observations, recommendations, follow-ups. AI will extract the details."
+          rows={6}
+          className="mt-1 text-base min-h-[140px]"
         />
+        {observations && (
+          <p className="text-xs text-muted-foreground mt-1">
+            {observations.split(/\s+/).filter(Boolean).length} words
+          </p>
+        )}
       </div>
 
+      {/* Photos */}
       <div>
-        <div className="flex items-center justify-between">
-          <Label>Recommendations</Label>
-          <VoiceInput
-            onTranscript={(text) => setRecommendations((prev) => (prev ? `${prev} ${text}` : text))}
-          />
-        </div>
-        <Textarea
-          value={recommendations}
-          onChange={(e) => setRecommendations(e.target.value)}
-          placeholder="Product recommendations and cultural practices..."
-          rows={3}
-        />
+        <Label className="mb-2 block">Photos (optional)</Label>
+        <PhotoCapture photos={photos} onPhotosChange={setPhotos} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <div className="flex items-center justify-between">
-            <Label>Follow-up Actions</Label>
-            <VoiceInput
-              onTranscript={(text) => setFollowUpActions((prev) => (prev ? `${prev} ${text}` : text))}
-            />
-          </div>
-          <Textarea
-            value={followUpActions}
-            onChange={(e) => setFollowUpActions(e.target.value)}
-            placeholder="Next steps..."
-            rows={2}
-          />
-        </div>
-        <div>
-          <Label>Follow-up Date</Label>
-          <Input
-            type="date"
-            value={followUpDate}
-            onChange={(e) => setFollowUpDate(e.target.value)}
-            className="min-h-[44px]"
-          />
-        </div>
+      {/* Follow-up date */}
+      <div className="max-w-[200px]">
+        <Label>Follow-up Date (optional)</Label>
+        <Input
+          type="date"
+          value={followUpDate}
+          onChange={(e) => setFollowUpDate(e.target.value)}
+          className="min-h-[44px]"
+        />
       </div>
 
       {/* Save */}
       <div className="flex justify-end pt-2">
-        <Button onClick={handleSave} disabled={!courseId || !visitDate || saving}>
+        <Button onClick={handleSave} disabled={!courseId || !visitDate || saving} className="min-h-[44px]">
           {saving ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -842,41 +551,6 @@ function PostVisitForm({
             "Save Report"
           )}
         </Button>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Condition Rating Selector
-// ---------------------------------------------------------------------------
-function ConditionSelect({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: ConditionRating | "";
-  onChange: (val: ConditionRating | "") => void;
-}) {
-  return (
-    <div className="space-y-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="flex gap-1.5 flex-wrap">
-        {CONDITION_RATINGS.map((rating) => (
-          <button
-            key={rating}
-            type="button"
-            onClick={() => onChange(value === rating ? "" : rating)}
-            className={`px-3 py-2 text-xs rounded-lg border transition-colors min-h-[44px] min-w-[44px] font-medium ${
-              value === rating
-                ? CONDITION_COLORS[rating]
-                : "bg-muted/50 text-muted-foreground hover:bg-muted active:bg-muted"
-            }`}
-          >
-            {rating}
-          </button>
-        ))}
       </div>
     </div>
   );

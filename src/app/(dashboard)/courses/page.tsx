@@ -168,7 +168,7 @@ export default function CoursesPage() {
             {filtered.length} course{filtered.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button size="sm" className="gap-2">
+        <Button size="sm" className="gap-2" onClick={() => router.push("/contacts?action=new")}>
           <Plus className="h-4 w-4" />
           Add Course
         </Button>

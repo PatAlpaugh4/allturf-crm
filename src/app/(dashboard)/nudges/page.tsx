@@ -5,18 +5,10 @@ import Link from "next/link";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   AlertTriangle,
   Bell,
-  CheckCircle2,
+  Check,
   Info,
   Loader2,
   Package,
@@ -26,7 +18,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  NUDGE_TYPES,
   NUDGE_TYPE_COLORS,
   type NudgeType,
 } from "@/lib/types";
@@ -44,7 +35,6 @@ interface NudgeRow {
   created_at: string;
   company: { id: string; name: string } | null;
   contact: { id: string; first_name: string; last_name: string } | null;
-  call_log: { id: string; created_at: string } | null;
 }
 
 const NUDGE_ICONS: Record<NudgeType, typeof Bell> = {
@@ -56,29 +46,52 @@ const NUDGE_ICONS: Record<NudgeType, typeof Bell> = {
   disease_alert: Sparkles,
 };
 
-const NUDGE_TYPE_LABELS: Record<NudgeType, string> = {
-  inventory_alert: "Inventory Alert",
-  promo_available: "Promo Available",
-  related_info: "Related Info",
-  action_reminder: "Action Reminder",
-  cross_sell: "Cross-Sell",
-  disease_alert: "Disease Alert",
+const PRIORITY_BORDER: Record<string, string> = {
+  urgent: "border-l-red-500",
+  high: "border-l-orange-500",
+  medium: "border-l-transparent",
+  low: "border-l-transparent",
 };
 
-const PRIORITY_STYLES: Record<string, string> = {
-  urgent: "bg-red-100 text-red-700",
-  high: "bg-orange-100 text-orange-700",
-  medium: "bg-yellow-100 text-yellow-700",
-  low: "bg-slate-100 text-slate-600",
-};
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+}
+
+function getDateGroup(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(now.getDate() - 1);
+  const yesterdayStr = yesterdayDate.toISOString().split("T")[0];
+  const dateOnlyStr = date.toISOString().split("T")[0];
+
+  if (dateOnlyStr === todayStr) return "Today";
+  if (dateOnlyStr === yesterdayStr) return "Yesterday";
+
+  // Check if within this week (last 7 days)
+  const weekAgo = new Date(now);
+  weekAgo.setDate(now.getDate() - 7);
+  if (date > weekAgo) return "This Week";
+
+  return "Earlier";
+}
 
 export default function NudgesPage() {
   const { profile } = useAuth();
   const supabase = createBrowserClient();
   const [nudges, setNudges] = useState<NudgeRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const fetchNudges = useCallback(async () => {
     if (!profile?.id) return;
@@ -88,129 +101,79 @@ export default function NudgesPage() {
       .from("rep_nudges")
       .select(
         `*, company:companies(id, name),
-         contact:contacts(id, first_name, last_name),
-         call_log:call_logs(id, created_at)`
+         contact:contacts(id, first_name, last_name)`
       )
       .eq("rep_id", profile.id)
       .order("created_at", { ascending: false })
       .limit(100);
 
-    // Status filter
-    if (statusFilter === "active") {
+    if (!showDismissed) {
       query = query.eq("is_dismissed", false).eq("is_completed", false);
-    } else if (statusFilter === "dismissed") {
-      query = query.eq("is_dismissed", true);
-    } else if (statusFilter === "completed") {
-      query = query.eq("is_completed", true);
-    }
-
-    // Type filter
-    if (typeFilter !== "all") {
-      query = query.eq("nudge_type", typeFilter);
     }
 
     const { data } = await query;
     setNudges((data as unknown as NudgeRow[]) || []);
     setLoading(false);
-  }, [profile?.id, supabase, typeFilter, statusFilter]);
+  }, [profile?.id, supabase, showDismissed]);
 
   useEffect(() => {
     fetchNudges();
   }, [fetchNudges]);
 
   const handleDismiss = async (nudgeId: string) => {
-    await supabase
+    const { error } = await supabase
       .from("rep_nudges")
       .update({ is_dismissed: true, dismissed_at: new Date().toISOString() })
       .eq("id", nudgeId);
 
+    if (error) { console.error("Failed to dismiss nudge:", error); return; }
     setNudges((prev) => prev.filter((n) => n.id !== nudgeId));
   };
 
   const handleComplete = async (nudgeId: string) => {
-    await supabase
+    const { error } = await supabase
       .from("rep_nudges")
       .update({ is_completed: true, completed_at: new Date().toISOString() })
       .eq("id", nudgeId);
 
+    if (error) { console.error("Failed to complete nudge:", error); return; }
     setNudges((prev) => prev.filter((n) => n.id !== nudgeId));
   };
 
-  const handleDismissAll = async () => {
-    if (!profile?.id) return;
-    const activeIds = nudges.filter((n) => !n.is_dismissed && !n.is_completed).map((n) => n.id);
-    if (activeIds.length === 0) return;
+  // Group nudges by date
+  const grouped = nudges.reduce<Record<string, NudgeRow[]>>((acc, nudge) => {
+    const group = getDateGroup(nudge.created_at);
+    if (!acc[group]) acc[group] = [];
+    acc[group].push(nudge);
+    return acc;
+  }, {});
 
-    await supabase
-      .from("rep_nudges")
-      .update({ is_dismissed: true, dismissed_at: new Date().toISOString() })
-      .in("id", activeIds);
-
-    setNudges((prev) => prev.filter((n) => !activeIds.includes(n.id)));
-  };
-
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString("en-CA", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-
-  const activeCount = nudges.length;
+  const groupOrder = ["Today", "Yesterday", "This Week", "Earlier"];
+  const activeCount = nudges.filter((n) => !n.is_dismissed && !n.is_completed).length;
 
   return (
-    <div className="page-enter mx-auto max-w-2xl space-y-5 pb-8">
+    <div className="page-enter mx-auto max-w-xl space-y-4 pb-8">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Bell className="h-5 w-5 text-primary" />
-            Suggestions
+            Notifications
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {activeCount} suggestion{activeCount !== 1 ? "s" : ""}
+            {activeCount > 0
+              ? `${activeCount} new suggestion${activeCount !== 1 ? "s" : ""}`
+              : "You're all caught up"}
           </p>
         </div>
-        {statusFilter === "active" && activeCount > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDismissAll}
-            className="gap-2 min-h-[44px]"
-          >
-            <X className="h-4 w-4" />
-            Dismiss All
-          </Button>
-        )}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-full sm:w-[200px] min-h-[44px]">
-            <SelectValue placeholder="Filter by type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="min-h-[44px]">All Types</SelectItem>
-            {NUDGE_TYPES.map((t) => (
-              <SelectItem key={t} value={t} className="min-h-[44px]">
-                {NUDGE_TYPE_LABELS[t]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-full sm:w-[180px] min-h-[44px]">
-            <SelectValue placeholder="Filter by status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active" className="min-h-[44px]">Active</SelectItem>
-            <SelectItem value="completed" className="min-h-[44px]">Completed</SelectItem>
-            <SelectItem value="dismissed" className="min-h-[44px]">Dismissed</SelectItem>
-            <SelectItem value="all" className="min-h-[44px]">All</SelectItem>
-          </SelectContent>
-        </Select>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowDismissed(!showDismissed)}
+          className="text-xs text-muted-foreground"
+        >
+          {showDismissed ? "Hide dismissed" : "Show all"}
+        </Button>
       </div>
 
       {/* Loading */}
@@ -222,126 +185,134 @@ export default function NudgesPage() {
 
       {/* Empty state */}
       {!loading && nudges.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Bell className="h-10 w-10 text-muted-foreground/40" />
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+            <Bell className="h-7 w-7 text-primary/60" />
+          </div>
           <p className="text-muted-foreground text-sm">
-            {statusFilter === "active"
-              ? "No active suggestions — you're all caught up!"
-              : "No suggestions matching filters"}
+            No notifications yet — log a call and AI will send you tips.
           </p>
         </div>
       )}
 
-      {/* Nudge cards */}
-      {!loading && (
-        <div className="space-y-3">
-          {nudges.map((nudge) => {
-            const Icon = NUDGE_ICONS[nudge.nudge_type] || Bell;
-            const isDone = nudge.is_completed || nudge.is_dismissed;
+      {/* Grouped feed */}
+      {!loading &&
+        groupOrder.map((group) => {
+          const items = grouped[group];
+          if (!items || items.length === 0) return null;
 
-            return (
-              <div
-                key={nudge.id}
-                className={`rounded-xl border p-4 space-y-3 transition-opacity ${
-                  isDone ? "opacity-50" : ""
-                }`}
-              >
-                {/* Top row: type badge + priority + actions */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${NUDGE_TYPE_COLORS[nudge.nudge_type]}`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                    </div>
-                    <Badge
-                      className={`text-[10px] ${NUDGE_TYPE_COLORS[nudge.nudge_type]}`}
-                    >
-                      {NUDGE_TYPE_LABELS[nudge.nudge_type]}
-                    </Badge>
-                    <Badge
-                      className={`text-[10px] ${PRIORITY_STYLES[nudge.priority] || PRIORITY_STYLES.medium}`}
-                    >
-                      {nudge.priority}
-                    </Badge>
-                    {nudge.is_completed && (
-                      <Badge className="text-[10px] bg-green-100 text-green-700">done</Badge>
-                    )}
-                    {nudge.is_dismissed && (
-                      <Badge className="text-[10px] bg-slate-100 text-slate-500">dismissed</Badge>
-                    )}
-                  </div>
-
-                  {!isDone && (
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        onClick={() => handleComplete(nudge.id)}
-                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-green-100 hover:text-green-600 transition-colors"
-                        title="Mark as done"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDismiss(nudge.id)}
-                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                        title="Dismiss"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Title and message */}
-                <div>
-                  <p className="text-sm font-medium">{nudge.title}</p>
-                  {nudge.message && (
-                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                      {nudge.message}
-                    </p>
-                  )}
-                  {nudge.suggested_action && (
-                    <p className="text-sm mt-1.5 text-primary/80 italic">
-                      Suggestion: {nudge.suggested_action}
-                    </p>
-                  )}
-                </div>
-
-                {/* Links row */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {nudge.company && (
-                    <Link
-                      href={`/courses/${nudge.company.id}`}
-                      className="hover:text-primary hover:underline"
-                    >
-                      {nudge.company.name}
-                    </Link>
-                  )}
-                  {nudge.contact && (
-                    <span>
-                      {nudge.contact.first_name} {nudge.contact.last_name}
-                    </span>
-                  )}
-                  {nudge.call_log && (
-                    <Link
-                      href="/calls"
-                      className="hover:text-primary hover:underline"
-                    >
-                      From call on {formatDate(nudge.call_log.created_at)}
-                    </Link>
-                  )}
-                  {nudge.due_date && (
-                    <span className={nudge.due_date < new Date().toISOString().split("T")[0] ? "text-destructive font-medium" : ""}>
-                      Due: {nudge.due_date}
-                    </span>
-                  )}
-                  <span className="ml-auto">{formatDate(nudge.created_at)}</span>
-                </div>
+          return (
+            <div key={group}>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1">
+                {group}
+              </p>
+              <div className="space-y-2">
+                {items.map((nudge) => (
+                  <NudgeCard
+                    key={nudge.id}
+                    nudge={nudge}
+                    onDismiss={handleDismiss}
+                    onComplete={handleComplete}
+                  />
+                ))}
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+function NudgeCard({
+  nudge,
+  onDismiss,
+  onComplete,
+}: {
+  nudge: NudgeRow;
+  onDismiss: (id: string) => void;
+  onComplete: (id: string) => void;
+}) {
+  const Icon = NUDGE_ICONS[nudge.nudge_type] || Bell;
+  const isDone = nudge.is_completed || nudge.is_dismissed;
+
+  return (
+    <div
+      className={`rounded-xl border border-l-4 ${PRIORITY_BORDER[nudge.priority] || ""} bg-card p-4 transition-opacity ${
+        isDone ? "opacity-40" : ""
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {/* Icon */}
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${NUDGE_TYPE_COLORS[nudge.nudge_type]}`}
+        >
+          <Icon className="h-4 w-4" />
         </div>
-      )}
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium leading-snug">{nudge.title}</p>
+          {nudge.message && (
+            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+              {nudge.message}
+            </p>
+          )}
+          {nudge.suggested_action && (
+            <p className="text-xs mt-1.5 text-primary/80 italic">
+              {nudge.suggested_action}
+            </p>
+          )}
+
+          {/* Meta row */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground">
+            <span>{timeAgo(nudge.created_at)}</span>
+            {nudge.company && (
+              <Link
+                href={`/courses/${nudge.company.id}`}
+                className="hover:text-primary hover:underline truncate max-w-[150px]"
+              >
+                {nudge.company.name}
+              </Link>
+            )}
+            {nudge.contact && (
+              <span className="truncate max-w-[120px]">
+                {nudge.contact.first_name} {nudge.contact.last_name}
+              </span>
+            )}
+            {nudge.due_date && (
+              <span
+                className={
+                  nudge.due_date < new Date().toISOString().split("T")[0]
+                    ? "text-destructive font-medium"
+                    : ""
+                }
+              >
+                Due {nudge.due_date}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Actions */}
+        {!isDone && (
+          <div className="flex shrink-0 gap-0.5">
+            <button
+              onClick={() => onComplete(nudge.id)}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-green-100 hover:text-green-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              title="Mark as done"
+            >
+              <Check className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => onDismiss(nudge.id)}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

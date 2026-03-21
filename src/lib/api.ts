@@ -27,23 +27,28 @@ function checkRateLimit(request: Request): NextResponse | null {
   return null;
 }
 
-function checkAuth(request: Request): NextResponse | null {
-  // Verify the request has a valid Supabase session token
+async function checkAuth(request: Request): Promise<NextResponse | null> {
   const authHeader = request.headers.get("authorization");
-
-  // Allow requests with auth header (Bearer token or Supabase session)
-  if (authHeader) return null;
-
-  // Allow requests with the cookie-based Supabase session
   const cookies = request.headers.get("cookie");
-  if (cookies?.includes("sb-")) return null;
 
-  // Allow requests from same origin (browser fetch from our app)
-  const origin = request.headers.get("origin");
-  const referer = request.headers.get("referer");
-  if (origin || referer) return null;
+  // Extract token from Bearer header or sb- cookie
+  const token = authHeader?.replace("Bearer ", "") ||
+    cookies?.match(/sb-[^=]+-auth-token=([^;]+)/)?.[1];
 
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Validate token with Supabase
+  const { createServiceClient } = await import("@/lib/supabase");
+  const supabase = createServiceClient();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+
+  if (error || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  return null;
 }
 
 /**
@@ -58,7 +63,7 @@ export function withApiProtection<T extends any[]>(
     const rateLimitResponse = checkRateLimit(request);
     if (rateLimitResponse) return rateLimitResponse;
 
-    const authResponse = checkAuth(request);
+    const authResponse = await checkAuth(request);
     if (authResponse) return authResponse;
 
     return handler(request, ...args);

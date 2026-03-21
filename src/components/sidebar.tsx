@@ -5,12 +5,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
+  Activity,
   Bell,
   LayoutDashboard,
   MapPin,
   Users,
   FlaskConical,
-  Stethoscope,
   Kanban,
   PhoneCall,
   Route,
@@ -33,27 +33,30 @@ interface NavLink {
   href: string;
   label: string;
   icon: LucideIcon;
+  adminOnly?: boolean;
 }
 
 const navLinks: NavLink[] = [
-  { href: "/dashboard",    label: "Dashboard",  icon: LayoutDashboard },
-  { href: "/courses",      label: "Courses",    icon: MapPin },
-  { href: "/contacts",     label: "Contacts",   icon: Users },
-  { href: "/products",     label: "Products",   icon: FlaskConical },
-  { href: "/consultation", label: "Consult",    icon: Stethoscope },
-  { href: "/pipeline",     label: "Pipeline",   icon: Kanban },
-  { href: "/calls",        label: "Calls",      icon: PhoneCall },
-  { href: "/nudges",       label: "Nudges",     icon: Bell },
-  { href: "/visits",       label: "Visits",     icon: Route },
-  { href: "/programs",     label: "Programs",   icon: Sprout },
-  { href: "/calendar",     label: "Calendar",   icon: CalendarDays },
-  { href: "/digest",       label: "Digest",     icon: FileText },
-  { href: "/reports",      label: "Reports",    icon: FileBarChart },
+  { href: "/dashboard",   label: "Dashboard",   icon: LayoutDashboard },
+  { href: "/calls",       label: "Calls",       icon: PhoneCall },
+  { href: "/nudges",      label: "Nudges",      icon: Bell },
+  { href: "/digest",      label: "Digest",      icon: FileText },
+  { href: "/field-intel", label: "Field Intel",  icon: Activity, adminOnly: true },
+  { href: "/courses",     label: "Courses",     icon: MapPin },
+  { href: "/contacts",    label: "Contacts",    icon: Users },
+  { href: "/visits",      label: "Visits",      icon: Route },
+  { href: "/pipeline",    label: "Deals",       icon: Kanban },
+  { href: "/products",    label: "Products",    icon: FlaskConical },
+  { href: "/calendar",    label: "Calendar",    icon: CalendarDays },
+  { href: "/reports",     label: "Reports",     icon: FileBarChart },
 ];
 
 function NavContent({ onLinkClick }: { onLinkClick?: () => void }) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
+  const isAdmin = profile?.role === "admin";
+
+  const visibleLinks = navLinks.filter((link) => !link.adminOnly || isAdmin);
 
   return (
     <div className="flex h-full flex-col">
@@ -75,7 +78,7 @@ function NavContent({ onLinkClick }: { onLinkClick?: () => void }) {
       {/* Nav links */}
       <ScrollArea className="flex-1 px-3">
         <nav className="flex flex-col gap-0.5 py-2">
-          {navLinks.map((link) => {
+          {visibleLinks.map((link) => {
             const isActive =
               pathname === link.href ||
               (link.href !== "/dashboard" && pathname.startsWith(link.href + "/"));

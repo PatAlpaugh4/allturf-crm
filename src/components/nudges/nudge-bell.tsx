@@ -4,8 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Popover,
   PopoverContent,
@@ -21,6 +19,7 @@ import {
   Sparkles,
   Tag,
   X,
+  Check,
 } from "lucide-react";
 import { NUDGE_TYPE_COLORS, type NudgeType } from "@/lib/types";
 
@@ -31,8 +30,6 @@ interface NudgePreview {
   title: string;
   message: string | null;
   created_at: string;
-  is_dismissed: boolean;
-  is_completed: boolean;
   company: { id: string; name: string } | null;
 }
 
@@ -43,6 +40,11 @@ const NUDGE_ICONS: Record<NudgeType, typeof Bell> = {
   action_reminder: AlertTriangle,
   cross_sell: ShoppingCart,
   disease_alert: Sparkles,
+};
+
+const PRIORITY_DOT: Record<string, string> = {
+  urgent: "bg-red-500",
+  high: "bg-orange-500",
 };
 
 function timeAgo(dateStr: string): string {
@@ -64,7 +66,6 @@ export function NudgeBell() {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  // Fetch unread count
   const fetchCount = useCallback(async () => {
     if (!profile?.id) return;
     const { count: total } = await supabase
@@ -77,20 +78,19 @@ export function NudgeBell() {
     setCount(total || 0);
   }, [profile?.id, supabase]);
 
-  // Fetch recent nudges for the dropdown
   const fetchNudges = useCallback(async () => {
     if (!profile?.id) return;
     const { data } = await supabase
       .from("rep_nudges")
       .select(
-        `id, nudge_type, priority, title, message, created_at, is_dismissed, is_completed,
+        `id, nudge_type, priority, title, message, created_at,
          company:companies(id, name)`
       )
       .eq("rep_id", profile.id)
       .eq("is_dismissed", false)
       .eq("is_completed", false)
       .order("created_at", { ascending: false })
-      .limit(8);
+      .limit(3);
 
     setNudges((data as unknown as NudgePreview[]) || []);
     setLoaded(true);
@@ -98,34 +98,36 @@ export function NudgeBell() {
 
   useEffect(() => {
     fetchCount();
-    // Re-fetch count every 60 seconds
-    const interval = setInterval(fetchCount, 60000);
+    const interval = setInterval(fetchCount, 30000);
     return () => clearInterval(interval);
   }, [fetchCount]);
 
   useEffect(() => {
-    if (open && !loaded) {
-      fetchNudges();
-    }
+    if (open && !loaded) fetchNudges();
+    // Reset loaded when closing so we get fresh data next open
+    if (!open) setLoaded(false);
   }, [open, loaded, fetchNudges]);
 
   const handleDismiss = async (nudgeId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await supabase
+    const { error } = await supabase
       .from("rep_nudges")
       .update({ is_dismissed: true, dismissed_at: new Date().toISOString() })
       .eq("id", nudgeId);
 
+    if (error) { console.error("Failed to dismiss nudge:", error); return; }
     setNudges((prev) => prev.filter((n) => n.id !== nudgeId));
     setCount((prev) => Math.max(0, prev - 1));
   };
 
-  const handleComplete = async (nudgeId: string) => {
-    await supabase
+  const handleComplete = async (nudgeId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const { error } = await supabase
       .from("rep_nudges")
       .update({ is_completed: true, completed_at: new Date().toISOString() })
       .eq("id", nudgeId);
 
+    if (error) { console.error("Failed to complete nudge:", error); return; }
     setNudges((prev) => prev.filter((n) => n.id !== nudgeId));
     setCount((prev) => Math.max(0, prev - 1));
   };
@@ -156,21 +158,22 @@ export function NudgeBell() {
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-sm font-semibold">Notifications</h3>
           {count > 0 && (
-            <Badge variant="secondary" className="text-[10px]">
+            <span className="text-[11px] text-muted-foreground">
               {count} active
-            </Badge>
+            </span>
           )}
         </div>
 
-        {/* Nudge list */}
-        <ScrollArea className="max-h-[400px]">
+        {/* Recent nudges */}
+        <div className="max-h-[320px] overflow-y-auto">
           {nudges.length === 0 && loaded && (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No active suggestions
+              No new notifications
             </div>
           )}
           {nudges.map((nudge) => {
             const Icon = NUDGE_ICONS[nudge.nudge_type] || Bell;
+            const hasDot = nudge.priority === "urgent" || nudge.priority === "high";
             return (
               <div
                 key={nudge.id}
@@ -178,18 +181,25 @@ export function NudgeBell() {
               >
                 <div className="flex items-start gap-3">
                   <div
-                    className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${NUDGE_TYPE_COLORS[nudge.nudge_type]}`}
+                    className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${NUDGE_TYPE_COLORS[nudge.nudge_type]}`}
                   >
                     <Icon className="h-3.5 w-3.5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-tight">{nudge.title}</p>
+                    <div className="flex items-center gap-1.5">
+                      {hasDot && (
+                        <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[nudge.priority]}`} />
+                      )}
+                      <p className="text-sm font-medium leading-tight truncate">
+                        {nudge.title}
+                      </p>
+                    </div>
                     {nudge.message && (
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
                         {nudge.message}
                       </p>
                     )}
-                    <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] text-muted-foreground">
                         {timeAgo(nudge.created_at)}
                       </span>
@@ -200,19 +210,17 @@ export function NudgeBell() {
                       )}
                     </div>
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className="flex shrink-0 gap-0.5">
                     <button
-                      onClick={() => handleComplete(nudge.id)}
-                      className="rounded p-1 text-muted-foreground hover:bg-green-100 hover:text-green-600 transition-colors"
-                      title="Mark as done"
+                      onClick={(e) => handleComplete(nudge.id, e)}
+                      className="rounded p-1.5 text-muted-foreground hover:bg-green-100 hover:text-green-600 transition-colors"
+                      title="Done"
                     >
-                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
+                      <Check className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={(e) => handleDismiss(nudge.id, e)}
-                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                      className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
                       title="Dismiss"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -222,7 +230,7 @@ export function NudgeBell() {
               </div>
             );
           })}
-        </ScrollArea>
+        </div>
 
         {/* Footer */}
         <div className="border-t px-4 py-2.5">
@@ -231,7 +239,7 @@ export function NudgeBell() {
             onClick={() => setOpen(false)}
             className="flex items-center justify-center gap-1 text-sm text-primary hover:underline"
           >
-            View All
+            See all notifications
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>

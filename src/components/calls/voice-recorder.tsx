@@ -18,6 +18,7 @@ export function VoiceRecorder({
   const [recording, setRecording] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
   const [interimText, setInterimText] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const transcriptRef = useRef(transcript);
 
@@ -69,22 +70,40 @@ export function VoiceRecorder({
       }
     };
 
-    recognition.onerror = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (event: any) => {
+      const errorCode: string = event.error || "unknown";
+      const messages: Record<string, string> = {
+        "not-allowed": "Microphone permission denied. Please allow access in browser settings.",
+        "no-speech": "No speech detected. Please try again.",
+        "network": "Network error. Check your connection and try again.",
+        "aborted": "Recording was interrupted.",
+      };
+      const msg = messages[errorCode] || `Speech recognition error: ${errorCode}`;
+      setErrorMessage(msg);
       setRecording(false);
       setInterimText("");
     };
 
     recognition.onend = () => {
-      // Auto-restart if still in recording mode (handles browser timeout)
-      if (recognitionRef.current === recognition) {
-        setRecording(false);
-        setInterimText("");
+      // Auto-restart if still in recording mode (handles browser's ~60s timeout)
+      if (recognitionRef.current === recognition && recording) {
+        try {
+          recognition.start();
+        } catch {
+          setRecording(false);
+          setInterimText("");
+        }
+        return;
       }
+      setRecording(false);
+      setInterimText("");
     };
 
     recognitionRef.current = recognition;
     recognition.start();
     setRecording(true);
+    setErrorMessage("");
   }, [onTranscriptChange]);
 
   const stopRecording = useCallback(() => {
@@ -160,6 +179,12 @@ export function VoiceRecorder({
       {interimText && (
         <p className="text-sm text-muted-foreground italic text-center px-4">
           {interimText}
+        </p>
+      )}
+
+      {errorMessage && (
+        <p className="text-sm text-destructive text-center px-4">
+          {errorMessage}
         </p>
       )}
 

@@ -35,7 +35,6 @@ import {
   Phone,
   Plus,
   Search,
-  Stethoscope,
 } from "lucide-react";
 import {
   PROCESSING_STATUSES,
@@ -316,17 +315,6 @@ export default function CallLogsPage() {
 }
 
 function CallLogDetail({ log }: { log: CallLogRow }) {
-  const router = useRouter();
-
-  const handleConsult = () => {
-    const params = new URLSearchParams();
-    if (log.company) params.set("course_id", log.company.id);
-    if (log.extraction?.diseases_mentioned && log.extraction.diseases_mentioned.length > 0) {
-      params.set("symptoms", log.extraction.diseases_mentioned.join(", "));
-    }
-    router.push(`/consultation?${params.toString()}`);
-  };
-
   return (
     <div className="mt-4 space-y-5">
       {/* Meta */}
@@ -503,20 +491,6 @@ function CallLogDetail({ log }: { log: CallLogRow }) {
         </>
       )}
 
-      {/* Consult on This button — bridge to consultation page */}
-      {log.extraction && log.processing_status === "completed" && (
-        <>
-          <Separator />
-          <Button
-            variant="outline"
-            className="w-full gap-2"
-            onClick={handleConsult}
-          >
-            <Stethoscope className="h-4 w-4" />
-            Consult on This
-          </Button>
-        </>
-      )}
     </div>
   );
 }

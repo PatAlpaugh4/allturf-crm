@@ -123,8 +123,8 @@ export default function NewCallLogPage() {
       .from("call_logs")
       .insert({
         rep_id: profile.id,
-        company_id: companyId || null,
-        contact_id: contactId || null,
+        company_id: companyId && companyId !== "__none" ? companyId : null,
+        contact_id: contactId && contactId !== "__none" ? contactId : null,
         input_type: "voice_dictation",
         raw_transcript: transcript.trim(),
         processing_status: "pending",

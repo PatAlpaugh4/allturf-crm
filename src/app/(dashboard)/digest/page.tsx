@@ -13,32 +13,39 @@ import {
 } from "@/components/ui/card";
 import {
   AlertTriangle,
-  BarChart3,
+  ArrowUp,
+  Bug,
   Calendar,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CheckCircle2,
+  Clock,
   FileText,
   Loader2,
+  Mail,
   Package,
-  ShieldAlert,
   Sparkles,
   TrendingUp,
+  User,
+  Users,
 } from "lucide-react";
+import type {
+  DigestStructuredData,
+  RepActivity,
+  DemandItem,
+  ReorderRequest,
+  DiseaseWatch,
+  ActionItemRollup,
+} from "@/lib/digest-generator";
 
 interface DigestData {
   id: string;
   digest_date: string;
   total_calls_logged: number;
   total_follow_ups_needed: number;
-  top_diseases: Array<{
-    disease_name: string;
-    mention_count: number;
-  }> | null;
-  top_products: Array<{
-    product_name: string;
-    request_count: number;
-  }> | null;
+  top_diseases: Array<{ disease_name: string; mention_count: number }> | null;
+  top_products: Array<{ product_name: string; request_count: number }> | null;
+  rep_activity_breakdown: DigestStructuredData | null;
   key_highlights: string | null;
   alerts: string | null;
   generated_at: string | null;
@@ -52,10 +59,7 @@ interface TrendSignal {
   description: string | null;
   data_points: number;
   is_active: boolean;
-  recommended_actions: Array<{
-    action: string;
-    priority: string | null;
-  }> | null;
+  recommended_actions: Array<{ action: string; priority: string | null }> | null;
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -79,7 +83,6 @@ export default function DigestPage() {
   const supabase = createBrowserClient();
   const { isAdmin } = useAuth();
 
-  // Default to yesterday
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
@@ -101,7 +104,6 @@ export default function DigestPage() {
       setDigest(data.digest || null);
     }
 
-    // Fetch active trend signals
     const { data: signalsData } = await supabase
       .from("field_trend_signals")
       .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
@@ -125,9 +127,7 @@ export default function DigestPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ digest_date: selectedDate }),
       });
-      if (res.ok) {
-        await fetchDigest();
-      }
+      if (res.ok) await fetchDigest();
     } finally {
       setGenerating(false);
     }
@@ -138,7 +138,6 @@ export default function DigestPage() {
       .from("field_trend_signals")
       .update({ is_active: false, resolved_at: new Date().toISOString() })
       .eq("id", signalId);
-
     setTrends((prev) => prev.filter((t) => t.id !== signalId));
   };
 
@@ -148,11 +147,11 @@ export default function DigestPage() {
     setSelectedDate(d.toISOString().split("T")[0]);
   };
 
-  // Parse key_highlights into sections
-  const sections = parseDigestSections(digest?.key_highlights || "");
+  // Extract structured data (new format) or fall back
+  const structured = digest?.rep_activity_breakdown as DigestStructuredData | null;
 
   return (
-    <div className="page-enter mx-auto max-w-3xl space-y-6 pb-8">
+    <div className="page-enter mx-auto max-w-3xl space-y-5 pb-8">
       {/* Header with date picker */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -161,17 +160,12 @@ export default function DigestPage() {
             Daily Digest
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Field intelligence summary for management
+            {formatDateStr(selectedDate)}
           </p>
         </div>
 
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigateDate(-1)}
-            className="h-9 w-9"
-          >
+          <Button variant="ghost" size="icon" onClick={() => navigateDate(-1)} className="h-9 w-9">
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm">
@@ -183,25 +177,20 @@ export default function DigestPage() {
               className="bg-transparent border-none outline-none text-sm w-[130px]"
             />
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigateDate(1)}
-            className="h-9 w-9"
-          >
+          <Button variant="ghost" size="icon" onClick={() => navigateDate(1)} className="h-9 w-9">
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      {/* Loading state */}
+      {/* Loading */}
       {loading && (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       )}
 
-      {/* No digest — generate button */}
+      {/* No digest — generate */}
       {!loading && !digest && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
@@ -213,21 +202,11 @@ export default function DigestPage() {
               </p>
             </div>
             {isAdmin && (
-              <Button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="min-h-[44px] gap-2"
-              >
+              <Button onClick={handleGenerate} disabled={generating} className="min-h-[44px] gap-2">
                 {generating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Generating...
-                  </>
+                  <><Loader2 className="h-4 w-4 animate-spin" />Generating...</>
                 ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Generate Digest
-                  </>
+                  <><Sparkles className="h-4 w-4" />Generate Digest</>
                 )}
               </Button>
             )}
@@ -239,28 +218,18 @@ export default function DigestPage() {
       {!loading && digest && (
         <>
           {/* Stats bar */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Card>
-              <CardContent className="p-4 text-center">
-                <p className="text-2xl font-bold">{digest.total_calls_logged}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Calls Logged</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <p className="text-2xl font-bold">{digest.total_follow_ups_needed}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Follow-ups Needed</p>
-              </CardContent>
-            </Card>
-            <Card className="col-span-2 sm:col-span-1">
-              <CardContent className="p-4 text-center">
-                <p className="text-2xl font-bold">{trends.length}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Active Alerts</p>
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard value={digest.total_calls_logged} label="Calls Logged" />
+            <StatCard
+              value={structured?.rep_activity?.length || 0}
+              label="Active Reps"
+              suffix={`/ ${(structured?.rep_activity?.length || 0) + (structured?.inactive_reps?.length || 0)}`}
+            />
+            <StatCard value={digest.total_follow_ups_needed} label="Follow-ups" />
+            <StatCard value={trends.length} label="Active Alerts" />
           </div>
 
-          {/* No activity message */}
+          {/* No activity */}
           {digest.total_calls_logged === 0 && (
             <Card>
               <CardContent className="py-8 text-center">
@@ -269,108 +238,58 @@ export default function DigestPage() {
             </Card>
           )}
 
-          {/* Digest sections */}
-          {digest.total_calls_logged > 0 && (
+          {digest.total_calls_logged > 0 && structured && (
             <>
-              {/* Executive Summary */}
-              {sections.executive_summary && (
-                <Card>
+              {/* a. Executive Summary */}
+              {structured.executive_summary && (
+                <Card className="border-primary/20 bg-primary/[0.02]">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4 text-primary" />
-                      Executive Summary
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm leading-relaxed">{sections.executive_summary}</p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Activity Overview */}
-              {sections.activity_overview && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-primary" />
-                      Activity Overview
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      Executive Briefing
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm leading-relaxed whitespace-pre-line">
-                      {sections.activity_overview}
+                      {structured.executive_summary}
                     </p>
                   </CardContent>
                 </Card>
               )}
 
-              {/* Field Intelligence */}
-              {sections.field_intelligence && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <ShieldAlert className="h-4 w-4 text-primary" />
-                      Field Intelligence
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <p className="text-sm leading-relaxed whitespace-pre-line">
-                      {sections.field_intelligence}
-                    </p>
+              {/* b. Rep Activity Breakdown */}
+              <RepActivitySection
+                reps={structured.rep_activity || []}
+                inactiveReps={structured.inactive_reps || []}
+              />
 
-                    {/* Top diseases inline */}
-                    {digest.top_diseases && digest.top_diseases.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {digest.top_diseases.slice(0, 6).map((d) => (
-                          <Badge
-                            key={d.disease_name}
-                            variant="outline"
-                            className="text-xs"
-                          >
-                            {d.disease_name}
-                            <span className="ml-1 opacity-60">({d.mention_count})</span>
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+              {/* c. Demand Intelligence */}
+              <DemandIntelligenceSection
+                products={structured.demand_intelligence?.products_in_demand || []}
+                reorders={structured.demand_intelligence?.reorder_requests || []}
+              />
 
-              {/* Action Items */}
-              {sections.action_items && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-primary" />
-                      Action Items
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm leading-relaxed whitespace-pre-line">
-                      {sections.action_items}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
+              {/* d. Disease/Pest Watch */}
+              <DiseaseWatchSection diseases={structured.disease_watch || []} />
 
-              {/* Inventory Implications */}
-              {sections.inventory && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Package className="h-4 w-4 text-primary" />
-                      Inventory Implications
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm leading-relaxed whitespace-pre-line">
-                      {sections.inventory}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
+              {/* e. Action Items Rollup */}
+              <ActionItemsSection rollup={structured.action_items_rollup || []} />
             </>
+          )}
+
+          {/* Fallback for old-format digests (key_highlights only) */}
+          {digest.total_calls_logged > 0 && !structured?.executive_summary && digest.key_highlights && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-relaxed whitespace-pre-line">{digest.key_highlights}</p>
+              </CardContent>
+            </Card>
           )}
 
           {/* Trend Alerts */}
@@ -384,18 +303,11 @@ export default function DigestPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {trends.map((signal) => (
-                  <div
-                    key={signal.id}
-                    className="surface-alert rounded-xl border p-4 space-y-2"
-                  >
+                  <div key={signal.id} className="rounded-xl border p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Badge
-                            className={
-                              SEVERITY_STYLES[signal.severity] || SEVERITY_STYLES.info
-                            }
-                          >
+                          <Badge className={SEVERITY_STYLES[signal.severity] || SEVERITY_STYLES.info}>
                             {signal.severity}
                           </Badge>
                           <span className="text-sm font-medium">{signal.title}</span>
@@ -406,75 +318,62 @@ export default function DigestPage() {
                           </p>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleAcknowledge(signal.id)}
-                        className="shrink-0 text-xs h-8"
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => handleAcknowledge(signal.id)} className="shrink-0 text-xs h-8">
                         Acknowledge
                       </Button>
                     </div>
-
-                    {signal.recommended_actions &&
-                      signal.recommended_actions.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Recommended actions:
-                          </p>
-                          <ul className="space-y-0.5">
-                            {signal.recommended_actions.map((action, i) => (
-                              <li
-                                key={i}
-                                className="text-xs text-muted-foreground flex items-start gap-1.5"
-                              >
-                                <span className="shrink-0 mt-1 h-1 w-1 rounded-full bg-muted-foreground/50" />
-                                {action.action}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                    {signal.recommended_actions && signal.recommended_actions.length > 0 && (
+                      <div className="space-y-1 pt-1">
+                        <p className="text-xs font-medium text-muted-foreground">Recommended actions:</p>
+                        <ul className="space-y-0.5">
+                          {signal.recommended_actions.map((action, i) => (
+                            <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                              <span className="shrink-0 mt-1 h-1 w-1 rounded-full bg-muted-foreground/50" />
+                              {action.action}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 ))}
               </CardContent>
             </Card>
           )}
 
-          {/* Regenerate button for admins */}
-          {isAdmin && (
-            <div className="flex justify-center pt-2">
+          {/* Footer: Regenerate + Email + timestamp */}
+          <div className="flex flex-col items-center gap-3 pt-2">
+            <div className="flex gap-2">
+              {isAdmin && (
+                <Button variant="outline" onClick={handleGenerate} disabled={generating} className="gap-2 text-sm">
+                  {generating ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />Regenerating...</>
+                  ) : (
+                    <><Sparkles className="h-4 w-4" />Regenerate</>
+                  )}
+                </Button>
+              )}
               <Button
                 variant="outline"
-                onClick={handleGenerate}
-                disabled={generating}
                 className="gap-2 text-sm"
+                title="Email delivery coming soon"
+                onClick={() => {/* Coming soon */}}
+                disabled
               >
-                {generating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Regenerating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Regenerate Digest
-                  </>
-                )}
+                <Mail className="h-4 w-4" />
+                Email Digest
               </Button>
             </div>
-          )}
-
-          {/* Generation timestamp */}
-          {digest.generated_at && (
-            <p className="text-center text-xs text-muted-foreground">
-              Generated{" "}
-              {new Date(digest.generated_at).toLocaleString("en-CA", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}
-            </p>
-          )}
+            {digest.generated_at && (
+              <p className="text-xs text-muted-foreground">
+                Generated{" "}
+                {new Date(digest.generated_at).toLocaleString("en-CA", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+              </p>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -482,52 +381,389 @@ export default function DigestPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Parse the key_highlights markdown into sections
+// Stat Card
 // ---------------------------------------------------------------------------
 
-interface ParsedSections {
-  executive_summary: string;
-  activity_overview: string;
-  field_intelligence: string;
-  action_items: string;
-  inventory: string;
+function StatCard({ value, label, suffix }: { value: number; label: string; suffix?: string }) {
+  return (
+    <Card>
+      <CardContent className="p-4 text-center">
+        <p className="text-2xl font-bold">
+          {value}
+          {suffix && <span className="text-sm font-normal text-muted-foreground ml-0.5">{suffix}</span>}
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+      </CardContent>
+    </Card>
+  );
 }
 
-function parseDigestSections(content: string): ParsedSections {
-  const sections: ParsedSections = {
-    executive_summary: "",
-    activity_overview: "",
-    field_intelligence: "",
-    action_items: "",
-    inventory: "",
-  };
+// ---------------------------------------------------------------------------
+// Rep Activity Section
+// ---------------------------------------------------------------------------
 
-  if (!content) return sections;
+function RepActivitySection({
+  reps,
+  inactiveReps,
+}: {
+  reps: RepActivity[];
+  inactiveReps: Array<{ name: string; territory: string | null }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const displayReps = expanded ? reps : reps.slice(0, 5);
 
-  // Split by ## headers
-  const parts = content.split(/^## /m);
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" />
+          Rep Activity
+          <Badge variant="secondary" className="text-[10px] font-normal ml-auto">
+            {reps.length} active
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {displayReps.map((rep) => {
+          const sentTotal = rep.sentiment_summary.positive + rep.sentiment_summary.neutral +
+            rep.sentiment_summary.concerned + rep.sentiment_summary.urgent;
+          const hasUrgent = rep.sentiment_summary.urgent > 0 || rep.sentiment_summary.concerned > 0;
 
-  // First part (before any ##) is the executive summary
-  if (parts[0]) {
-    sections.executive_summary = parts[0].trim();
-  }
+          return (
+            <div key={rep.rep_id} className="rounded-lg border px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <User className="h-3.5 w-3.5 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{rep.rep_name}</p>
+                    {rep.territory && (
+                      <p className="text-[10px] text-muted-foreground">{rep.territory}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 text-xs">
+                  <span className="font-semibold">{rep.calls_logged} calls</span>
+                  {hasUrgent && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" title="Has urgent/concerned calls" />
+                  )}
+                </div>
+              </div>
 
-  for (let i = 1; i < parts.length; i++) {
-    const part = parts[i];
-    const newlineIdx = part.indexOf("\n");
-    const heading = (newlineIdx >= 0 ? part.slice(0, newlineIdx) : part).toLowerCase();
-    const body = newlineIdx >= 0 ? part.slice(newlineIdx + 1).trim() : "";
+              {/* Accounts */}
+              {rep.accounts_touched.length > 0 && (
+                <p className="text-xs text-muted-foreground pl-9 truncate">
+                  {rep.accounts_touched.join(", ")}
+                </p>
+              )}
 
-    if (heading.includes("activity")) {
-      sections.activity_overview = body;
-    } else if (heading.includes("intelligence") || heading.includes("field")) {
-      sections.field_intelligence = body;
-    } else if (heading.includes("action")) {
-      sections.action_items = body;
-    } else if (heading.includes("inventory")) {
-      sections.inventory = body;
-    }
-  }
+              {/* Commitments */}
+              {rep.commitments.length > 0 && (
+                <div className="pl-9 space-y-0.5">
+                  {rep.commitments.slice(0, 3).map((c, i) => (
+                    <p key={i} className="text-xs flex items-start gap-1.5">
+                      <CheckCircle2 className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />
+                      <span className="text-muted-foreground">
+                        {c.description}
+                        {c.deadline && (
+                          <span className="text-amber-600 font-medium"> (due {c.deadline})</span>
+                        )}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              )}
 
-  return sections;
+              {/* Sentiment bar */}
+              {sentTotal > 0 && (
+                <div className="flex gap-0.5 h-1 rounded-full overflow-hidden ml-9">
+                  {rep.sentiment_summary.positive > 0 && (
+                    <div className="bg-green-400" style={{ flex: rep.sentiment_summary.positive }} />
+                  )}
+                  {rep.sentiment_summary.neutral > 0 && (
+                    <div className="bg-gray-300 dark:bg-gray-600" style={{ flex: rep.sentiment_summary.neutral }} />
+                  )}
+                  {rep.sentiment_summary.concerned > 0 && (
+                    <div className="bg-amber-400" style={{ flex: rep.sentiment_summary.concerned }} />
+                  )}
+                  {rep.sentiment_summary.urgent > 0 && (
+                    <div className="bg-red-400" style={{ flex: rep.sentiment_summary.urgent }} />
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {reps.length > 5 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-primary hover:underline w-full text-center py-1"
+          >
+            {expanded ? "Show less" : `Show all ${reps.length} reps`}
+          </button>
+        )}
+
+        {/* Inactive reps */}
+        {inactiveReps.length > 0 && (
+          <div className="rounded-lg border border-dashed px-3 py-2 mt-2">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium">{inactiveReps.length} reps</span> did not log activity:{" "}
+              {inactiveReps.map((r) => r.name).join(", ")}
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Demand Intelligence Section
+// ---------------------------------------------------------------------------
+
+function DemandIntelligenceSection({
+  products,
+  reorders,
+}: {
+  products: DemandItem[];
+  reorders: ReorderRequest[];
+}) {
+  if (products.length === 0 && reorders.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-primary" />
+          Demand Intelligence
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Products in demand */}
+        {products.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Products in Demand</p>
+            <div className="overflow-x-auto -mx-4 px-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th className="text-left py-1.5 pr-2 font-medium">Product</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Mentions</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Requests</th>
+                    <th className="text-right py-1.5 pl-2 font-medium">Inventory</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.slice(0, 8).map((p) => (
+                    <tr key={p.product_name} className={`border-b last:border-b-0 ${p.is_low_stock ? "bg-red-50 dark:bg-red-950/20" : ""}`}>
+                      <td className="py-1.5 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate max-w-[180px] capitalize">{p.product_name}</span>
+                          {p.is_low_stock && (
+                            <Badge className="text-[9px] bg-red-100 text-red-700 shrink-0">LOW</Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-1.5 px-2 text-right">{p.mention_count}</td>
+                      <td className="py-1.5 px-2 text-right">
+                        {p.request_count > 0 ? (
+                          <span className="font-medium text-primary">{p.request_count}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pl-2 text-right">
+                        {p.inventory_on_hand != null ? (
+                          <span className={p.is_low_stock ? "text-red-600 font-medium" : ""}>
+                            {p.inventory_on_hand}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">N/A</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Reorder requests */}
+        {reorders.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Reorder Requests</p>
+            <div className="space-y-1.5">
+              {reorders.slice(0, 6).map((r, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 text-xs rounded-lg border px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="font-medium capitalize truncate">{r.product_name}</span>
+                    <span className="text-muted-foreground truncate">for {r.customer_name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 text-muted-foreground">
+                    {r.quantity && <span>{r.quantity} units</span>}
+                    {r.needed_by && (
+                      <Badge variant="outline" className="text-[10px] h-5">
+                        by {r.needed_by}
+                      </Badge>
+                    )}
+                    <span className="text-[10px]">via {r.rep_name}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Disease/Pest Watch Section
+// ---------------------------------------------------------------------------
+
+function DiseaseWatchSection({ diseases }: { diseases: DiseaseWatch[] }) {
+  if (diseases.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Bug className="h-4 w-4 text-primary" />
+          Disease / Pest Watch
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {diseases.slice(0, 8).map((d) => (
+          <div key={d.disease_name} className="rounded-lg border px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-medium">{d.disease_name}</span>
+                {d.trending === "up" && (
+                  <Badge className="text-[9px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 gap-0.5">
+                    <ArrowUp className="h-2.5 w-2.5" />
+                    Trending
+                  </Badge>
+                )}
+                {d.trending === "new" && (
+                  <Badge className="text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                    New
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                <span>{d.mention_count} mentions</span>
+                <span>{d.rep_count} reps</span>
+              </div>
+            </div>
+            {d.regions.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Regions: {d.regions.join(", ")}
+              </p>
+            )}
+            {d.related_products.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {d.related_products.map((p) => (
+                  <Badge key={p} variant="outline" className="text-[10px] h-5">
+                    {p}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Action Items Rollup Section
+// ---------------------------------------------------------------------------
+
+function ActionItemsSection({ rollup }: { rollup: ActionItemRollup[] }) {
+  const allItems = rollup.flatMap((r) => r.items);
+  if (allItems.length === 0) return null;
+
+  const overdueCount = allItems.filter((i) => i.status === "overdue").length;
+  const dueTodayCount = allItems.filter((i) => i.status === "due_today").length;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-primary" />
+          Action Items
+          <div className="flex gap-1.5 ml-auto">
+            {overdueCount > 0 && (
+              <Badge className="text-[10px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                {overdueCount} overdue
+              </Badge>
+            )}
+            {dueTodayCount > 0 && (
+              <Badge className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                {dueTodayCount} due today
+              </Badge>
+            )}
+          </div>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {rollup.slice(0, 8).map((rep) => (
+          <div key={rep.rep_id}>
+            <p className="text-xs font-medium text-muted-foreground mb-1.5">{rep.rep_name}</p>
+            <div className="space-y-1">
+              {rep.items.slice(0, 5).map((item, i) => (
+                <div
+                  key={i}
+                  className={`flex items-start gap-2 text-xs rounded-lg border px-3 py-2 ${
+                    item.status === "overdue"
+                      ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
+                      : item.status === "due_today"
+                        ? "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20"
+                        : ""
+                  }`}
+                >
+                  <Clock className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${
+                    item.status === "overdue" ? "text-red-500" :
+                    item.status === "due_today" ? "text-amber-500" :
+                    "text-muted-foreground"
+                  }`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-muted-foreground">{item.description}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {item.company_name && (
+                        <span className="text-[10px] text-muted-foreground">{item.company_name}</span>
+                      )}
+                      {item.due_date && (
+                        <span className={`text-[10px] font-medium ${
+                          item.status === "overdue" ? "text-red-600" :
+                          item.status === "due_today" ? "text-amber-600" :
+                          "text-muted-foreground"
+                        }`}>
+                          {item.status === "overdue" ? `Overdue (${item.due_date})` :
+                           item.status === "due_today" ? "Due today" :
+                           `Due ${item.due_date}`}
+                        </span>
+                      )}
+                      <Badge variant="outline" className="text-[9px] h-4">{item.type.replace(/_/g, " ")}</Badge>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {rep.items.length > 5 && (
+                <p className="text-[10px] text-muted-foreground text-center">
+                  +{rep.items.length - 5} more items
+                </p>
+              )}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
 }

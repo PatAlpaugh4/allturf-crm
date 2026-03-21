@@ -1,5 +1,7 @@
 import { Sidebar, MobileNav } from "@/components/sidebar";
 import { NudgeBell } from "@/components/nudges/nudge-bell";
+import { NudgeToastListener } from "@/components/nudges/nudge-toast-listener";
+import { CallCaptureFab } from "@/components/call-capture-fab";
 
 export default function DashboardLayout({
   children,
@@ -17,6 +19,8 @@ export default function DashboardLayout({
         </div>
         <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
       </div>
+      <CallCaptureFab />
+      <NudgeToastListener />
     </div>
   );
 }
