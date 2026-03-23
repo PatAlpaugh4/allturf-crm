@@ -44,7 +44,7 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST: Create a promotion (admin only)
 export const POST = withApiProtection(async (request: Request) => {
   try {
-    const auth = await requireAdmin();
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
     const user = auth.user;
 

@@ -8,7 +8,7 @@ import { generateDailyDigest } from "@/lib/digest-generator";
 
 export const POST = withApiProtection(async (request: Request) => {
   try {
-    const auth = await requireAdmin();
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
 
     const body = await request.json().catch(() => ({}));

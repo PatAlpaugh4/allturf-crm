@@ -98,7 +98,10 @@ export default function DigestPage() {
     setLoading(true);
     setDigest(null);
 
-    const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}`);
+    const { data: { session } } = await supabase.auth.getSession();
+    const authHeaders: Record<string, string> = {};
+    if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
+    const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}`, { headers: authHeaders });
     if (res.ok) {
       const data = await res.json();
       setDigest(data.digest || null);
@@ -125,9 +128,14 @@ export default function DigestPage() {
     setGenerating(true);
     setGenerateError(null);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
       const res = await fetch("/api/turf/daily-digest", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ digest_date: selectedDate }),
       });
       if (res.ok) {

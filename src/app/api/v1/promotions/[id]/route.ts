@@ -23,7 +23,7 @@ export const GET = withApiProtection(async (_request: Request, ctx?: RouteContex
 
 // PUT: Update promotion (admin only)
 export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext) => {
-  const auth = await requireAdmin();
+  const auth = await requireAdmin(request);
   if (auth.error) return auth.error;
 
   const supabase = createServiceClient();
@@ -43,7 +43,7 @@ export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext
 
 // DELETE: Deactivate promotion (admin only — soft delete via active=false)
 export const DELETE = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
-  const auth = await requireAdmin();
+  const auth = await requireAdmin(_request);
   if (auth.error) return auth.error;
 
   const supabase = createServiceClient();

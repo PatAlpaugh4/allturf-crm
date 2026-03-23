@@ -57,7 +57,7 @@ export const GET = withApiProtection(async () => {
 // PUT: Update inventory quantities (admin only)
 export const PUT = withApiProtection(async (request: Request) => {
   try {
-    const auth = await requireAdmin();
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
     const user = auth.user;
 

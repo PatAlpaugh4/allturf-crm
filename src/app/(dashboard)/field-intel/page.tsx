@@ -160,7 +160,10 @@ export default function FieldIntelPage() {
     });
     if (territory) params.set("territory", territory);
 
-    const res = await fetch(`/api/turf/field-timeline?${params}`);
+    const { data: { session } } = await supabase.auth.getSession();
+    const fetchHeaders: Record<string, string> = {};
+    if (session?.access_token) fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
+    const res = await fetch(`/api/turf/field-timeline?${params}`, { headers: fetchHeaders });
     if (res.ok) {
       const data = await res.json();
       setTimeline(data.timeline || []);

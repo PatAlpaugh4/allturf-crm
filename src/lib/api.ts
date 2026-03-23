@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createServerClient } from "@/lib/supabase";
+import { createServerClient, createServiceClient } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 // Simple in-memory rate limiter (per-IP, resets on deploy)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -29,43 +30,62 @@ function checkRateLimit(request: Request): NextResponse | null {
   return null;
 }
 
-async function checkAuth(): Promise<NextResponse | null> {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(cookieStore);
-  const { data: { user }, error } = await supabase.auth.getUser();
+/**
+ * Resolve the authenticated user from either:
+ *   1. next/headers cookies (SSR server client)
+ *   2. Authorization: Bearer <token> header (service client)
+ * Returns the Supabase User or null.
+ */
+async function resolveUser(request?: Request): Promise<User | null> {
+  // Try cookies first (works when called from same-origin browser fetch)
+  try {
+    const cookieStore = await cookies();
+    const safeCookieStore = {
+      getAll() { return cookieStore.getAll(); },
+      set(name: string, value: string, options?: Record<string, unknown>) {
+        try { cookieStore.set(name, value, options ?? {}); } catch { /* read-only */ }
+      },
+    };
+    const supabase = createServerClient(safeCookieStore);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) return user;
+  } catch {
+    // cookies() may throw in some contexts
+  }
 
-  if (error || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Fallback: Authorization header
+  if (request) {
+    const authHeader = request.headers.get("authorization");
+    const token = authHeader?.replace("Bearer ", "");
+    if (token) {
+      const supabase = createServiceClient();
+      const { data: { user } } = await supabase.auth.getUser(token);
+      if (user) return user;
+    }
   }
 
   return null;
 }
 
 /**
- * Helper to get the authenticated user from cookies in an API route.
- * Returns { user, profile } or null if not authenticated.
+ * Helper to get the authenticated user from an API route.
  */
-export async function getApiUser() {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(cookieStore);
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user;
+export async function getApiUser(request?: Request) {
+  return resolveUser(request);
 }
 
 /**
  * Require admin role. Returns { user } or a NextResponse error.
  * Use inside withApiProtection handlers that need admin access.
  */
-export async function requireAdmin(): Promise<
-  { user: { id: string }; error?: never } | { user?: never; error: NextResponse }
+export async function requireAdmin(request?: Request): Promise<
+  { user: User; error?: never } | { user?: never; error: NextResponse }
 > {
-  const user = await getApiUser();
+  const user = await resolveUser(request);
   if (!user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const { createServiceClient } = await import("@/lib/supabase");
   const supabase = createServiceClient();
   const { data: profile } = await supabase
     .from("user_profiles")
@@ -92,8 +112,10 @@ export function withApiProtection<T extends any[]>(
     const rateLimitResponse = checkRateLimit(request);
     if (rateLimitResponse) return rateLimitResponse;
 
-    const authResponse = await checkAuth();
-    if (authResponse) return authResponse;
+    const user = await resolveUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     return handler(request, ...args);
   };

@@ -4,7 +4,7 @@ import { createServiceClient } from "@/lib/supabase";
 
 export const GET = withApiProtection(async (request: Request) => {
   try {
-    const auth = await requireAdmin();
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
 
     const supabase = createServiceClient();
