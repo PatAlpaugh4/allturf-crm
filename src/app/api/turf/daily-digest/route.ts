@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection, requireAdmin } from "@/lib/api";
+import { withApiProtection } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 import { generateDailyDigest } from "@/lib/digest-generator";
 
@@ -8,9 +8,6 @@ import { generateDailyDigest } from "@/lib/digest-generator";
 
 export const POST = withApiProtection(async (request: Request) => {
   try {
-    const auth = await requireAdmin(request);
-    if (auth.error) return auth.error;
-
     const body = await request.json().catch(() => ({}));
 
     // Default to yesterday if no date provided
