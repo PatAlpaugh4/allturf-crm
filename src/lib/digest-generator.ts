@@ -306,7 +306,7 @@ async function gatherDayActivity(
        extraction:call_log_extractions(
          summary, sentiment, diseases_mentioned, products_mentioned,
          products_requested, action_items, follow_up_needed, follow_up_date,
-         confidence_score, extracted_commitments, extracted_reorders, urgency_level
+         confidence_score, competitor_mentions, budget_signals
        )`
     )
     .gte("created_at", dayStart.toISOString())
