@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, clampInt } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 export const GET = withApiProtection(async (request: Request) => {
@@ -8,8 +8,8 @@ export const GET = withApiProtection(async (request: Request) => {
     const productId = searchParams.get("product_id");
     const signalType = searchParams.get("signal_type");
     const region = searchParams.get("region");
-    const days = parseInt(searchParams.get("days") || "7");
-    const limit = Math.min(parseInt(searchParams.get("limit") || "100"), 500);
+    const days = clampInt(searchParams.get("days"), 7, 1, 365);
+    const limit = clampInt(searchParams.get("limit"), 100, 1, 500);
 
     const supabase = createServiceClient();
 
@@ -39,8 +39,7 @@ export const GET = withApiProtection(async (request: Request) => {
     }
 
     return NextResponse.json({ signals: data || [], total: count });
-  } catch (err) {
-    console.error("[/api/v1/demand-signals GET] Error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch demand signals" },
       { status: 500 },

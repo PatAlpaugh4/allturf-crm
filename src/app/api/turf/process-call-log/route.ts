@@ -44,8 +44,7 @@ export const POST = withApiProtection(async (request: Request) => {
     return NextResponse.json(result, {
       status: result.success ? 200 : 500,
     });
-  } catch (err) {
-    console.error("[/api/turf/process-call-log] Error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Processing failed. Please try again." },
       { status: 500 }

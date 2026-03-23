@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, clampInt } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 export const GET = withApiProtection(async (request: Request) => {
@@ -8,8 +8,8 @@ export const GET = withApiProtection(async (request: Request) => {
     const repId = searchParams.get("rep_id");
     const nudgeType = searchParams.get("nudge_type");
     const status = searchParams.get("status"); // "active", "dismissed", "completed", "all"
-    const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
-    const offset = parseInt(searchParams.get("offset") || "0");
+    const limit = clampInt(searchParams.get("limit"), 50, 1, 100);
+    const offset = clampInt(searchParams.get("offset"), 0, 0, 10000);
 
     if (!repId) {
       return NextResponse.json(
@@ -52,8 +52,7 @@ export const GET = withApiProtection(async (request: Request) => {
     }
 
     return NextResponse.json({ nudges: data, total: count });
-  } catch (err) {
-    console.error("[/api/v1/nudges GET] Error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch nudges" },
       { status: 500 }

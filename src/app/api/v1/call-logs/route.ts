@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, clampInt } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list call logs with extractions and nudges
@@ -9,7 +9,7 @@ export const GET = withApiProtection(async (request: Request) => {
   const repId = searchParams.get("rep_id");
   const companyId = searchParams.get("company_id");
   const status = searchParams.get("processing_status");
-  const limit = parseInt(searchParams.get("limit") || "50");
+  const limit = clampInt(searchParams.get("limit"), 50, 1, 200);
 
   let query = supabase
     .from("call_logs")

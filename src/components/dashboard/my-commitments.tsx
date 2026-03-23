@@ -25,15 +25,15 @@ export function MyCommitmentsCard() {
     if (!user) { setLoading(false); return; }
 
     async function load() {
-      // Fetch extractions from this rep's calls that have commitments
+      // Fetch extractions from this rep's calls that have action items
       const { data } = await supabase
         .from("call_log_extractions")
         .select(`
-          id, extracted_commitments, action_items,
+          id, action_items,
           call_log:call_logs!inner(rep_id, company:companies(name))
         `)
         .eq("call_log.rep_id", user!.id)
-        .not("extracted_commitments", "is", null)
+        .not("action_items", "is", null)
         .order("created_at", { ascending: false })
         .limit(30);
 
@@ -45,24 +45,26 @@ export function MyCommitmentsCard() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const cl = row.call_log as any;
           const companyName = cl?.company?.name || null;
-          const commitArr = row.extracted_commitments as Array<{
+          const actionItems = row.action_items as Array<{
+            type: string;
             description: string;
-            deadline: string | null;
-            owner: string | null;
+            due_date: string | null;
+            priority: string | null;
+            completed?: boolean;
           }> | null;
 
-          if (!commitArr) continue;
-          for (const c of commitArr) {
-            if (c.owner === "customer") continue;
+          if (!actionItems) continue;
+          for (const ai of actionItems) {
+            if (ai.completed) continue;
             let status: Commitment["status"] = "pending";
-            if (c.deadline) {
-              if (c.deadline < today) status = "overdue";
-              else if (c.deadline === today) status = "due_today";
+            if (ai.due_date) {
+              if (ai.due_date < today) status = "overdue";
+              else if (ai.due_date === today) status = "due_today";
             }
             items.push({
-              id: `${row.id}-${c.description.slice(0, 20)}`,
-              description: c.description,
-              deadline: c.deadline,
+              id: `${row.id}-${ai.description.slice(0, 20)}`,
+              description: ai.description,
+              deadline: ai.due_date,
               company_name: companyName,
               status,
             });

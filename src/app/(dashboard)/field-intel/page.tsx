@@ -34,9 +34,7 @@ interface TimelineEntry {
   diseases_mentioned: string[] | null;
   products_mentioned: string[] | null;
   products_requested: Array<{ product_name: string; quantity?: number; unit?: string }> | null;
-  extracted_commitments: Array<{ description: string; deadline: string | null }> | null;
-  extracted_reorders: Array<{ product_name: string; quantity?: number; unit?: string }> | null;
-  urgency_level: string | null;
+  action_items: Array<{ type: string; description: string; due_date: string | null }> | null;
   confidence_score: number | null;
   created_at: string;
   call_log: {
@@ -154,37 +152,160 @@ export default function FieldIntelPage() {
   const fetchData = useCallback(async () => {
     if (!profile?.id) return;
     setLoading(true);
-
-    const params = new URLSearchParams({
-      start_date: startDate,
-      end_date: endDate,
-    });
-    if (territory) params.set("territory", territory);
-
     setFetchError(null);
+
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const fetchHeaders: Record<string, string> = {};
-      if (session?.access_token) fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
-      const res = await fetch(`/api/turf/field-timeline?${params}`, { headers: fetchHeaders });
-      if (res.ok) {
-        const data = await res.json();
-        setTimeline(data.timeline || []);
-        setAlerts(data.alerts || []);
-        setTrendingDiseases(data.trending_diseases || []);
-        setTrendingProducts(data.trending_products || []);
-        setHotRegions(data.hot_regions || []);
-        setStockAlerts(data.stock_alerts || []);
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        setFetchError(errData.error || `Failed to load (${res.status})`);
+      // Build timeline query
+      let timelineQuery = supabase
+        .from("call_log_extractions")
+        .select(`
+          id, call_log_id, summary, sentiment, diseases_mentioned, products_mentioned,
+          products_requested, action_items, confidence_score, created_at,
+          call_log:call_logs!inner(
+            id, raw_transcript, created_at,
+            rep:user_profiles(id, full_name, territory),
+            company:companies(id, name),
+            contact:contacts(id, first_name, last_name)
+          )
+        `)
+        .gte("created_at", `${startDate}T00:00:00Z`)
+        .lte("created_at", `${endDate}T23:59:59Z`)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (territory) {
+        timelineQuery = timelineQuery.eq("call_log.rep.territory", territory);
       }
+
+      // Run all queries in parallel
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [timelineResult, alertsResult, inventoryResult, demandResult] = await Promise.all([
+        timelineQuery,
+        supabase
+          .from("field_trend_signals")
+          .select("*")
+          .eq("is_active", true)
+          .order("severity", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(10),
+        supabase
+          .from("inventory")
+          .select(`product_id, quantity_on_hand, quantity_committed, quantity_on_order, reorder_point,
+                   product:offerings!inner(id, name, category)`)
+          .eq("product.is_active", true),
+        supabase
+          .from("demand_signals")
+          .select("product_id")
+          .gte("created_at", weekAgo)
+          .not("product_id", "is", null),
+      ]);
+
+      if (timelineResult.error) {
+        setFetchError("Failed to fetch timeline");
+        setLoading(false);
+        return;
+      }
+
+      const entries = (timelineResult.data || []) as unknown as TimelineEntry[];
+      setTimeline(entries);
+      setAlerts((alertsResult.data || []) as unknown as TrendAlert[]);
+
+      // Aggregate diseases, products, territories from timeline
+      const diseaseCounts = new Map<string, number>();
+      const productCounts = new Map<string, { discussed: number; requested: number }>();
+      const territoryCounts = new Map<string, number>();
+
+      for (const entry of entries) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cl = entry.call_log as any;
+        const repTerritory = cl?.rep?.territory;
+        if (repTerritory) {
+          territoryCounts.set(repTerritory, (territoryCounts.get(repTerritory) || 0) + 1);
+        }
+        if (Array.isArray(entry.diseases_mentioned)) {
+          for (const d of entry.diseases_mentioned) {
+            diseaseCounts.set(d, (diseaseCounts.get(d) || 0) + 1);
+          }
+        }
+        if (Array.isArray(entry.products_mentioned)) {
+          for (const p of entry.products_mentioned) {
+            const existing = productCounts.get(p) || { discussed: 0, requested: 0 };
+            existing.discussed++;
+            productCounts.set(p, existing);
+          }
+        }
+        if (Array.isArray(entry.products_requested)) {
+          for (const pr of entry.products_requested) {
+            const existing = productCounts.get(pr.product_name) || { discussed: 0, requested: 0 };
+            existing.requested++;
+            productCounts.set(pr.product_name, existing);
+          }
+        }
+      }
+
+      setTrendingDiseases(
+        Array.from(diseaseCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([name, count]) => ({ name, count }))
+      );
+      setTrendingProducts(
+        Array.from(productCounts.entries())
+          .sort((a, b) => (b[1].discussed + b[1].requested) - (a[1].discussed + a[1].requested))
+          .slice(0, 10)
+          .map(([name, counts]) => ({ name, discussed: counts.discussed, requested: counts.requested }))
+      );
+      setHotRegions(
+        Array.from(territoryCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, count]) => ({ name, count }))
+      );
+
+      // Build stock alerts
+      const demandMap = new Map<string, number>();
+      if (demandResult.data) {
+        for (const d of demandResult.data) {
+          if (d.product_id) {
+            demandMap.set(d.product_id, (demandMap.get(d.product_id) || 0) + 1);
+          }
+        }
+      }
+
+      const computedStockAlerts = (inventoryResult.data || [])
+        .map((row) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const product = (row as any).product as { id: string; name: string; category: string };
+          const demand = demandMap.get(row.product_id) || 0;
+          const lowStock = row.quantity_on_hand <= row.reorder_point;
+          const highDemand = demand >= 3;
+          if (!lowStock && !highDemand) return null;
+          return {
+            product_id: row.product_id,
+            product_name: product?.name || "Unknown",
+            category: product?.category || "",
+            quantity_on_hand: row.quantity_on_hand,
+            reorder_point: row.reorder_point,
+            quantity_on_order: row.quantity_on_order,
+            demand_this_week: demand,
+            low_stock: lowStock,
+            high_demand: highDemand,
+          };
+        })
+        .filter((s): s is StockAlert => s !== null)
+        .sort((a, b) => {
+          const aScore = (a.low_stock ? 2 : 0) + (a.high_demand ? 1 : 0);
+          const bScore = (b.low_stock ? 2 : 0) + (b.high_demand ? 1 : 0);
+          return bScore - aScore;
+        });
+
+      setStockAlerts(computedStockAlerts);
     } catch {
       setFetchError("Network error loading field intel");
     }
 
     setLoading(false);
-  }, [profile?.id, startDate, endDate, territory, supabase.auth]);
+  }, [profile?.id, startDate, endDate, territory, supabase]);
 
   useEffect(() => {
     if (isAdmin) fetchData();
@@ -520,19 +641,6 @@ function TimelineCard({ entry }: { entry: TimelineEntry }) {
           <span className="font-medium">{rep?.full_name || "Unknown rep"}</span>
           <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${sentimentColor}`} title={entry.sentiment || "neutral"} />
           <span className="text-xs text-muted-foreground">{formatTime(entry.created_at)}</span>
-          {entry.urgency_level && entry.urgency_level !== "routine" && (
-            <Badge
-              className={`text-[10px] ${
-                entry.urgency_level === "emergency"
-                  ? "bg-red-100 text-red-700"
-                  : entry.urgency_level === "urgent"
-                    ? "bg-orange-100 text-orange-700"
-                    : "bg-yellow-100 text-yellow-700"
-              }`}
-            >
-              {entry.urgency_level}
-            </Badge>
-          )}
         </div>
 
         {/* Course + contact */}
@@ -598,17 +706,17 @@ function TimelineCard({ entry }: { entry: TimelineEntry }) {
           ))}
         </div>
 
-        {/* Commitments */}
-        {entry.extracted_commitments && entry.extracted_commitments.length > 0 && (
+        {/* Action items */}
+        {entry.action_items && entry.action_items.length > 0 && (
           <div className="text-xs space-y-0.5 mt-1">
-            {entry.extracted_commitments.map((c, i) => (
+            {entry.action_items.map((ai, i) => (
               <div key={i} className="flex items-start gap-1.5 text-muted-foreground">
                 <span className="text-primary mt-px">→</span>
                 <span>
-                  {c.description}
-                  {c.deadline && (
+                  {ai.description}
+                  {ai.due_date && (
                     <span className="ml-1 font-medium text-foreground">
-                      (by {c.deadline})
+                      (by {ai.due_date})
                     </span>
                   )}
                 </span>

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { withApiProtection, requireAdmin } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
-export async function GET(request: Request) {
+export const GET = withApiProtection(async (request: Request) => {
   try {
+    const adminCheck = await requireAdmin(request);
+    if (adminCheck.error) return adminCheck.error;
+
     const supabase = createServiceClient();
 
     // Parse query params
@@ -46,7 +50,6 @@ export async function GET(request: Request) {
     const { data: timeline, error: timelineError } = await timelineQuery;
 
     if (timelineError) {
-      console.error("[field-timeline] Timeline query error:", timelineError);
       return NextResponse.json(
         { error: "Failed to fetch timeline" },
         { status: 500 },
@@ -197,11 +200,10 @@ export async function GET(request: Request) {
       alerts: alerts || [],
       stock_alerts: stockAlerts,
     });
-  } catch (err) {
-    console.error("[field-timeline] Error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Failed to load field timeline" },
       { status: 500 },
     );
   }
-}
+});

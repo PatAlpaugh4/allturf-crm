@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { NudgeBell } from "@/components/nudges/nudge-bell";
+import { TourTrigger } from "@/components/tour-trigger";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -106,6 +107,9 @@ function NavContent({ onLinkClick }: { onLinkClick?: () => void }) {
           })}
         </nav>
       </ScrollArea>
+
+      {/* Tour trigger */}
+      <TourTrigger />
 
       {/* Bottom section — scenic image with user overlay */}
       <div className="mt-auto">

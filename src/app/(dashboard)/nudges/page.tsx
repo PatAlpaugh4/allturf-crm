@@ -126,7 +126,7 @@ export default function NudgesPage() {
       .update({ is_dismissed: true, dismissed_at: new Date().toISOString() })
       .eq("id", nudgeId);
 
-    if (error) { console.error("Failed to dismiss nudge:", error); return; }
+    if (error) return;
     setNudges((prev) => prev.filter((n) => n.id !== nudgeId));
   };
 
@@ -136,7 +136,7 @@ export default function NudgesPage() {
       .update({ is_completed: true, completed_at: new Date().toISOString() })
       .eq("id", nudgeId);
 
-    if (error) { console.error("Failed to complete nudge:", error); return; }
+    if (error) return;
     setNudges((prev) => prev.filter((n) => n.id !== nudgeId));
   };
 

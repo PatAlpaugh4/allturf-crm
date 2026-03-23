@@ -39,12 +39,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertCircle,
   Users,
   Search,
   Loader2,
   Plus,
   Phone,
   Mail,
+  X,
 } from "lucide-react";
 import { CONTACT_ROLES, type Contact } from "@/lib/types";
 
@@ -75,6 +77,7 @@ export default function ContactsPage() {
 
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   // Detail sheet
@@ -86,14 +89,21 @@ export default function ContactsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const loadContacts = useCallback(async () => {
-    const { data } = await supabase
-      .from("contacts")
-      .select("*, company:companies(id, name)")
-      .order("last_name")
-      .order("first_name");
+    try {
+      setError(null);
+      const { data, error: fetchError } = await supabase
+        .from("contacts")
+        .select("*, company:companies(id, name)")
+        .order("last_name")
+        .order("first_name");
 
-    if (data) setContacts(data as ContactRow[]);
-    setLoading(false);
+      if (fetchError) throw fetchError;
+      if (data) setContacts(data as ContactRow[]);
+      setLoading(false);
+    } catch {
+      setError("Failed to load contacts. Please try again.");
+      setLoading(false);
+    }
   }, [supabase]);
 
   useEffect(() => {
@@ -136,6 +146,16 @@ export default function ContactsPage() {
           Add Contact
         </Button>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => loadContacts()}>Retry</Button>
+          <button onClick={() => setError(null)} className="text-destructive/60 hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative max-w-sm">

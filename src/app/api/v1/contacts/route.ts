@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, sanitizeSearch } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list contacts with company join
@@ -21,7 +21,8 @@ export const GET = withApiProtection(async (request: Request) => {
   if (status) query = query.eq("status", status);
   if (role) query = query.eq("role", role);
   if (search) {
-    query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
+    const s = sanitizeSearch(search);
+    query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,email.ilike.%${s}%`);
   }
 
   const { data, error } = await query;

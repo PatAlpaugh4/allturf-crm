@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, sanitizeSearch } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list offerings with disease links and all product fields
@@ -23,7 +23,8 @@ export const GET = withApiProtection(async (request: Request) => {
   if (activeOnly === "true") query = query.eq("is_active", true);
   if (moaGroup) query = query.eq("moa_group", moaGroup);
   if (search) {
-    query = query.or(`name.ilike.%${search}%,active_ingredients.cs.{${search}}`);
+    const s = sanitizeSearch(search);
+    query = query.or(`name.ilike.%${s}%,active_ingredients.cs.{${s}}`);
   }
 
   const { data, error } = await query;

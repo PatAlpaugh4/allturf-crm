@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertCircle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -44,6 +45,7 @@ import {
   Plus,
   Trash2,
   Truck,
+  X,
 } from "lucide-react";
 import { EVENT_TYPES } from "@/lib/types";
 
@@ -200,6 +202,7 @@ export default function CalendarPage() {
 
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   // Reps default to week, managers default to month
   const [view, setView] = useState<ViewMode>(isAdmin ? "month" : "week");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -240,6 +243,8 @@ export default function CalendarPage() {
   // ------ Data loading ------
 
   const loadEvents = useCallback(async () => {
+    try {
+    setError(null);
     let rangeStart: string;
     let rangeEnd: string;
 
@@ -376,6 +381,10 @@ export default function CalendarPage() {
 
     setEvents(all);
     setLoading(false);
+    } catch {
+      setError("Failed to load calendar events. Please try again.");
+      setLoading(false);
+    }
   }, [supabase, calYear, calMonth, view, currentDate, reps]);
 
   useEffect(() => {
@@ -504,6 +513,16 @@ export default function CalendarPage() {
           New Event
         </Button>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => loadEvents()}>Retry</Button>
+          <button onClick={() => setError(null)} className="text-destructive/60 hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">

@@ -20,11 +20,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AlertCircle,
   Search,
   Loader2,
   DollarSign,
   Filter,
+  X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import {
   STAGE_COLORS,
   type QuoteStage,
@@ -56,12 +60,15 @@ interface PipelineDeal {
 export default function PipelinePage() {
   const [deals, setDeals] = useState<PipelineDeal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [seasonFilter, setSeason] = useState<string>("all");
   const supabase = createBrowserClient();
 
   const load = useCallback(async () => {
-    const { data: rawDeals } = await supabase
+    try {
+    setError(null);
+    const { data: rawDeals, error: fetchError } = await supabase
       .from("deals")
       .select(`
         id, name, stage, value_cad, season, created_at, updated_at,
@@ -72,6 +79,7 @@ export default function PipelinePage() {
       .in("stage", PIPELINE_STAGES)
       .order("created_at", { ascending: false });
 
+    if (fetchError) throw fetchError;
     if (!rawDeals) {
       setLoading(false);
       return;
@@ -97,6 +105,10 @@ export default function PipelinePage() {
 
     setDeals(rows);
     setLoading(false);
+    } catch {
+      setError("Failed to load deals. Please try again.");
+      setLoading(false);
+    }
   }, [supabase]);
 
   useEffect(() => {
@@ -125,7 +137,7 @@ export default function PipelinePage() {
       .update({ stage: newStage })
       .eq("id", dealId);
     if (error) {
-      console.error("Failed to update deal stage:", error);
+      toast.error("Failed to update deal stage");
       load();
     }
   };
@@ -180,6 +192,16 @@ export default function PipelinePage() {
           </Select>
         </div>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => load()}>Retry</Button>
+          <button onClick={() => setError(null)} className="text-destructive/60 hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
       {/* Deal table */}
       <div className="rounded-lg border overflow-hidden">

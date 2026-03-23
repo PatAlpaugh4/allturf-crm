@@ -28,11 +28,13 @@ import {
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertCircle,
   CheckCircle2,
   ChevronRight,
   Loader2,
   Phone,
   Search,
+  X,
 } from "lucide-react";
 import {
   PROCESSING_STATUSES,
@@ -85,13 +87,16 @@ interface CallLogRow {
 export default function CallLogsPage() {
   const [logs, setLogs] = useState<CallLogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedLog, setSelectedLog] = useState<CallLogRow | null>(null);
   const supabase = createBrowserClient();
 
   const loadLogs = useCallback(async () => {
-    const { data } = await supabase
+    try {
+    setError(null);
+    const { data, error: fetchError } = await supabase
       .from("call_logs")
       .select(`
         *,
@@ -104,8 +109,13 @@ export default function CallLogsPage() {
       .order("created_at", { ascending: false })
       .limit(100);
 
+    if (fetchError) throw fetchError;
     if (data) setLogs(data as unknown as CallLogRow[]);
     setLoading(false);
+    } catch {
+      setError("Failed to load call logs. Please try again.");
+      setLoading(false);
+    }
   }, [supabase]);
 
   useEffect(() => {
@@ -190,6 +200,16 @@ export default function CallLogsPage() {
           Log Call
         </Button>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => loadLogs()}>Retry</Button>
+          <button onClick={() => setError(null)} className="text-destructive/60 hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">

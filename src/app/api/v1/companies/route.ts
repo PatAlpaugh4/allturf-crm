@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, sanitizeSearch } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list companies with golf course profiles joined
@@ -18,7 +18,7 @@ export const GET = withApiProtection(async (request: Request) => {
     .order("name");
 
   if (industry) query = query.eq("industry", industry);
-  if (search) query = query.ilike("name", `%${search}%`);
+  if (search) query = query.ilike("name", `%${sanitizeSearch(search)}%`);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

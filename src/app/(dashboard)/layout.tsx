@@ -2,6 +2,7 @@ import { Sidebar, MobileNav } from "@/components/sidebar";
 import { NudgeBell } from "@/components/nudges/nudge-bell";
 import { NudgeToastListener } from "@/components/nudges/nudge-toast-listener";
 import { CallCaptureFab } from "@/components/call-capture-fab";
+import { ProductTour } from "@/components/product-tour";
 
 export default function DashboardLayout({
   children,
@@ -21,6 +22,7 @@ export default function DashboardLayout({
       </div>
       <CallCaptureFab />
       <NudgeToastListener />
+      <ProductTour />
     </div>
   );
 }

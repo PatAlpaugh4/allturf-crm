@@ -218,11 +218,17 @@ function CallCaptureForm({ onComplete }: { onComplete: () => void }) {
       toast.success("Call saved — AI is processing...");
 
       // Fire-and-forget: trigger AI processing
-      fetch("/api/turf/process-call-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ call_log_id: data.id }),
-      }).catch(() => {});
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (sessionData.session?.access_token) {
+          headers["Authorization"] = `Bearer ${sessionData.session.access_token}`;
+        }
+        fetch("/api/turf/process-call-log", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ call_log_id: data.id }),
+        }).catch(() => {});
+      });
 
       onComplete();
     }

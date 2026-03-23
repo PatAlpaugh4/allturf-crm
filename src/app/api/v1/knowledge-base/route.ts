@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, sanitizeSearch } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list knowledge base entries with search
@@ -18,7 +18,10 @@ export const GET = withApiProtection(async (request: Request) => {
     .order("title");
 
   if (category) query = query.eq("category", category);
-  if (search) query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
+  if (search) {
+    const s = sanitizeSearch(search);
+    query = query.or(`title.ilike.%${s}%,content.ilike.%${s}%`);
+  }
   if (grassType) query = query.contains("grass_types", [grassType]);
   if (season) query = query.contains("seasonal_relevance", [season]);
 

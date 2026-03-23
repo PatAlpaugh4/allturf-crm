@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, sanitizeSearch } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list diseases/pests with optional search and type filter
@@ -17,7 +17,7 @@ export const GET = withApiProtection(async (request: Request) => {
 
   if (type) query = query.eq("type", type);
   if (ontarioOnly === "true") query = query.eq("ontario_common", true);
-  if (search) query = query.ilike("name", `%${search}%`);
+  if (search) query = query.ilike("name", `%${sanitizeSearch(search)}%`);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

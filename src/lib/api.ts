@@ -136,6 +136,23 @@ export function withApiProtection<T extends any[]>(
 }
 
 /**
+ * Sanitize user search input before interpolation into PostgREST filter strings.
+ * Strips characters that have special meaning in PostgREST syntax.
+ */
+export function sanitizeSearch(input: string): string {
+  return input.replace(/[,.()"'\\]/g, "").trim().slice(0, 200);
+}
+
+/**
+ * Parse and clamp an integer query parameter within safe bounds.
+ */
+export function clampInt(value: string | null, defaultVal: number, min: number, max: number): number {
+  const n = parseInt(value ?? "", 10);
+  if (isNaN(n)) return defaultVal;
+  return Math.min(Math.max(n, min), max);
+}
+
+/**
  * Sanitize user input before embedding in AI prompts.
  * Escapes characters that could be used for prompt injection.
  */

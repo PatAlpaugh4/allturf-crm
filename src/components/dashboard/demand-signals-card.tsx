@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { createBrowserClient } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, Loader2, TrendingUp } from "lucide-react";
@@ -16,34 +17,50 @@ interface DemandRow {
 export function DemandSignalsCard() {
   const [rows, setRows] = useState<DemandRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const supabase = createBrowserClient();
 
   useEffect(() => {
     async function load() {
-      // Fetch demand signals from the past 7 days
-      const res = await fetch("/api/v1/demand-signals?days=7&limit=500");
-      if (!res.ok) { setLoading(false); return; }
-      const data = await res.json();
-      const signals = data.signals || [];
+      // Fetch demand signals from the past 7 days directly via Supabase
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 7);
+
+      const { data: signals } = await supabase
+        .from("demand_signals")
+        .select("product_id, product_name, signal_type, quantity_mentioned")
+        .gte("created_at", cutoff.toISOString())
+        .limit(500);
+
+      if (!signals || signals.length === 0) {
+        setLoading(false);
+        return;
+      }
 
       // Count by product
       const counts = new Map<string, { count: number; productId: string | null }>();
       for (const s of signals) {
-        const name = (s.product?.name || s.product_name || "Unknown").toLowerCase();
+        const name = (s.product_name || "Unknown").toLowerCase();
         const existing = counts.get(name) || { count: 0, productId: s.product_id };
         existing.count++;
         counts.set(name, existing);
       }
 
-      // Fetch inventory for top products
-      const invRes = await fetch("/api/v1/inventory");
-      const invData = invRes.ok ? await invRes.json() : { inventory: [] };
+      // Fetch inventory levels
+      const { data: invRows } = await supabase
+        .from("inventory")
+        .select("product_id, quantity_on_hand, reorder_point, product:offerings(name)");
+
       const invMap = new Map<string, { on_hand: number; reorder_point: number }>();
-      for (const inv of invData.inventory || []) {
-        if (inv.product?.name) {
-          invMap.set(inv.product.name.toLowerCase(), {
-            on_hand: inv.quantity_on_hand,
-            reorder_point: inv.reorder_point,
-          });
+      if (invRows) {
+        for (const inv of invRows) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const productName = (inv as any).product?.name;
+          if (productName) {
+            invMap.set(productName.toLowerCase(), {
+              on_hand: inv.quantity_on_hand,
+              reorder_point: inv.reorder_point,
+            });
+          }
         }
       }
 
@@ -64,7 +81,7 @@ export function DemandSignalsCard() {
       setLoading(false);
     }
     load();
-  }, []);
+  }, [supabase]);
 
   return (
     <Card>

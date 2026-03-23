@@ -307,15 +307,6 @@ export async function processCallLog(callLogId: string): Promise<ProcessingResul
       action_items: actionItems,
       key_topics: extraction.key_topics,
       confidence_score: Math.max(0, Math.min(1, extraction.confidence_score)),
-      extracted_contact_name: extraction.contact_names[0] || null,
-      extracted_company_name: extraction.company_names[0] || null,
-      extracted_products_requested: extraction.products_requested.map((p) => p.product_name),
-      extracted_quantities: extraction.products_requested
-        .filter((p) => p.quantity != null)
-        .map((p) => ({ product: p.product_name, quantity: p.quantity, unit: p.unit })),
-      extracted_commitments: extraction.commitments,
-      extracted_reorders: extraction.reorders,
-      urgency_level: extraction.urgency_level,
     })
     .select("id")
     .single();
@@ -819,7 +810,7 @@ async function generateCalendarEvents(params: {
     events.push({
       title: `Follow up: ${companyName || "Customer"}`,
       description: `Re: ${summaryFirstSentence}`,
-      event_type: "follow_up",
+      event_type: "meeting",
       start_date: extraction.follow_up_date,
       end_date: extraction.follow_up_date,
       team_member: teamMember,
@@ -844,7 +835,7 @@ async function generateCalendarEvents(params: {
     events.push({
       title: commitment.description.slice(0, 100),
       description,
-      event_type: "commitment",
+      event_type: "meeting",
       start_date: commitment.deadline,
       end_date: commitment.deadline,
       team_member: teamMember,

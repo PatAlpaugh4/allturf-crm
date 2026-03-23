@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertCircle,
   Search,
   FlaskConical,
   Loader2,
@@ -56,6 +57,7 @@ export default function ProductsPage() {
   const { isAdmin } = useAuth();
   const [products, setProducts] = useState<Offering[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ProductCategory | "All">("All");
   const [search, setSearch] = useState("");
   const [showInventory, setShowInventory] = useState(false);
@@ -77,20 +79,28 @@ export default function ProductsPage() {
     setPromosLoading(false);
   }, []);
 
-  useEffect(() => {
-    async function load() {
-      const { data } = await supabase
+  const loadProducts = useCallback(async () => {
+    try {
+      setError(null);
+      const { data, error: fetchError } = await supabase
         .from("offerings")
         .select("*")
         .eq("is_active", true)
         .order("category")
         .order("name");
+      if (fetchError) throw fetchError;
       if (data) setProducts(data as Offering[]);
       setLoading(false);
+    } catch {
+      setError("Failed to load products. Please try again.");
+      setLoading(false);
     }
-    load();
+  }, [supabase]);
+
+  useEffect(() => {
+    loadProducts();
     fetchPromotions();
-  }, [supabase, fetchPromotions]);
+  }, [loadProducts, fetchPromotions]);
 
   const fetchInventory = useCallback(async () => {
     setInventoryLoading(true);
@@ -171,6 +181,16 @@ export default function ProductsPage() {
           )}
         </div>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => loadProducts()}>Retry</Button>
+          <button onClick={() => setError(null)} className="text-destructive/60 hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
       {/* Current Specials (visible to all users) */}
       {!promosLoading && promotions.length > 0 && !showPromoManager && (

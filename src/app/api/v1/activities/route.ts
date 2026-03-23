@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, clampInt } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET — list activities with visit report link
@@ -10,7 +10,7 @@ export const GET = withApiProtection(async (request: Request) => {
   const dealId = searchParams.get("deal_id");
   const type = searchParams.get("type");
   const repId = searchParams.get("assigned_rep_id");
-  const limit = parseInt(searchParams.get("limit") || "50");
+  const limit = clampInt(searchParams.get("limit"), 50, 1, 200);
 
   let query = supabase
     .from("activities")

@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { withApiProtection, requireAdmin } from "@/lib/api";
 import { generateDailyDigest } from "@/lib/digest-generator";
 
 // Future: trigger via cron job each morning at 7:00 AM ET.
 // For now, on-demand via the digest UI or direct API call.
 
-export async function POST(request: Request) {
+export const POST = withApiProtection(async (request: Request) => {
   try {
+    const adminCheck = await requireAdmin(request);
+    if (adminCheck.error) return adminCheck.error;
+
     const body = await request.json().catch(() => ({}));
 
     // Default to yesterday if no date provided
@@ -29,18 +33,20 @@ export async function POST(request: Request) {
     return NextResponse.json(result, {
       status: result.success ? 200 : 500,
     });
-  } catch (err) {
-    console.error("[/api/turf/daily-digest] Error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Digest generation failed. Please try again." },
       { status: 500 }
     );
   }
-}
+});
 
 // GET: Retrieve an existing digest by date
-export async function GET(request: Request) {
+export const GET = withApiProtection(async (request: Request) => {
   try {
+    const adminCheck = await requireAdmin(request);
+    if (adminCheck.error) return adminCheck.error;
+
     const { searchParams } = new URL(request.url);
     const dateStr = searchParams.get("date");
 
@@ -63,11 +69,10 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ digest });
-  } catch (err) {
-    console.error("[/api/turf/daily-digest GET] Error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Failed to retrieve digest." },
       { status: 500 }
     );
   }
-}
+});

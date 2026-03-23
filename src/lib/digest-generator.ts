@@ -419,28 +419,30 @@ async function gatherDayActivity(
         }
       }
 
-      // Commitments (A9 field)
-      if (Array.isArray(ext.extracted_commitments)) {
-        for (const c of ext.extracted_commitments) {
-          if (c.description) {
+      // Commitments — derive from action_items (commitments no longer stored as separate column)
+      if (Array.isArray(ext.action_items)) {
+        for (const ai of ext.action_items) {
+          if (ai.description) {
             repData.commitments.push({
-              description: c.description,
-              deadline: c.deadline || null,
+              description: ai.description,
+              deadline: ai.due_date || null,
             });
           }
         }
       }
 
-      // Reorder requests (A9 field)
-      if (Array.isArray(ext.extracted_reorders)) {
-        for (const ro of ext.extracted_reorders) {
-          reorderRequests.push({
-            product_name: ro.product_name || "Unknown",
-            customer_name: company?.name || "Unknown",
-            rep_name: repName,
-            quantity: ro.quantity || null,
-            needed_by: ro.needed_by || null,
-          });
+      // Reorder requests — derive from products_requested
+      if (Array.isArray(ext.products_requested)) {
+        for (const pr of ext.products_requested) {
+          if (pr.product_name) {
+            reorderRequests.push({
+              product_name: pr.product_name,
+              customer_name: company?.name || "Unknown",
+              rep_name: repName,
+              quantity: pr.quantity || null,
+              needed_by: null,
+            });
+          }
         }
       }
 
