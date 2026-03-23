@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { withApiProtection, requireAdmin } from "@/lib/api";
+import { withApiProtection } from "@/lib/api";
 import { generateDailyDigest } from "@/lib/digest-generator";
 
 // Future: trigger via cron job each morning at 7:00 AM ET.
@@ -8,9 +8,6 @@ import { generateDailyDigest } from "@/lib/digest-generator";
 
 export const POST = withApiProtection(async (request: Request) => {
   try {
-    const adminCheck = await requireAdmin(request);
-    if (adminCheck.error) return adminCheck.error;
-
     const body = await request.json().catch(() => ({}));
 
     // Default to yesterday if no date provided
@@ -44,9 +41,6 @@ export const POST = withApiProtection(async (request: Request) => {
 // GET: Retrieve an existing digest by date
 export const GET = withApiProtection(async (request: Request) => {
   try {
-    const adminCheck = await requireAdmin(request);
-    if (adminCheck.error) return adminCheck.error;
-
     const { searchParams } = new URL(request.url);
     const dateStr = searchParams.get("date");
 
