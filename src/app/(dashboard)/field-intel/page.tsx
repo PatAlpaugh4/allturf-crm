@@ -123,9 +123,10 @@ export default function FieldIntelPage() {
   const router = useRouter();
   const supabase = createBrowserClient();
 
-  const [rangeDays, setRangeDays] = useState(3);
+  const [rangeDays, setRangeDays] = useState(14);
   const [territory, setTerritory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [alerts, setAlerts] = useState<TrendAlert[]>([]);
   const [trendingDiseases, setTrendingDiseases] = useState<TrendingDisease[]>([]);
@@ -160,18 +161,26 @@ export default function FieldIntelPage() {
     });
     if (territory) params.set("territory", territory);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const fetchHeaders: Record<string, string> = {};
-    if (session?.access_token) fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
-    const res = await fetch(`/api/turf/field-timeline?${params}`, { headers: fetchHeaders });
-    if (res.ok) {
-      const data = await res.json();
-      setTimeline(data.timeline || []);
-      setAlerts(data.alerts || []);
-      setTrendingDiseases(data.trending_diseases || []);
-      setTrendingProducts(data.trending_products || []);
-      setHotRegions(data.hot_regions || []);
-      setStockAlerts(data.stock_alerts || []);
+    setFetchError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const fetchHeaders: Record<string, string> = {};
+      if (session?.access_token) fetchHeaders["Authorization"] = `Bearer ${session.access_token}`;
+      const res = await fetch(`/api/turf/field-timeline?${params}`, { headers: fetchHeaders });
+      if (res.ok) {
+        const data = await res.json();
+        setTimeline(data.timeline || []);
+        setAlerts(data.alerts || []);
+        setTrendingDiseases(data.trending_diseases || []);
+        setTrendingProducts(data.trending_products || []);
+        setHotRegions(data.hot_regions || []);
+        setStockAlerts(data.stock_alerts || []);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setFetchError(errData.error || `Failed to load (${res.status})`);
+      }
+    } catch (err) {
+      setFetchError("Network error loading field intel");
     }
 
     setLoading(false);
@@ -280,6 +289,11 @@ export default function FieldIntelPage() {
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : fetchError ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <AlertTriangle className="h-10 w-10 text-red-400" />
+              <p className="text-sm text-red-600 dark:text-red-400">{fetchError}</p>
             </div>
           ) : timeline.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
