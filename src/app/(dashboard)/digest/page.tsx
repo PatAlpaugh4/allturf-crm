@@ -119,15 +119,25 @@ export default function DigestPage() {
     fetchDigest();
   }, [fetchDigest]);
 
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   const handleGenerate = async () => {
     setGenerating(true);
+    setGenerateError(null);
     try {
       const res = await fetch("/api/turf/daily-digest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ digest_date: selectedDate }),
       });
-      if (res.ok) await fetchDigest();
+      if (res.ok) {
+        await fetchDigest();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setGenerateError(data.error || `Generation failed (${res.status})`);
+      }
+    } catch {
+      setGenerateError("Network error — could not reach server");
     } finally {
       setGenerating(false);
     }
@@ -209,6 +219,9 @@ export default function DigestPage() {
                   <><Sparkles className="h-4 w-4" />Generate Digest</>
                 )}
               </Button>
+            )}
+            {generateError && (
+              <p className="text-sm text-red-600 dark:text-red-400 mt-2">{generateError}</p>
             )}
           </CardContent>
         </Card>

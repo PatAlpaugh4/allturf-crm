@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, requireAdmin } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 // GET: List active promotions (optionally filter by product_id)
@@ -44,39 +44,11 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST: Create a promotion (admin only)
 export const POST = withApiProtection(async (request: Request) => {
   try {
+    const auth = await requireAdmin();
+    if (auth.error) return auth.error;
+    const user = auth.user;
+
     const supabase = createServiceClient();
-
-    // Admin check
-    const authHeader = request.headers.get("authorization");
-    const token =
-      authHeader?.replace("Bearer ", "") ||
-      request.headers
-        .get("cookie")
-        ?.match(/sb-[^=]+-auth-token=([^;]+)/)?.[1];
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser(token);
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: profile } = await supabase
-      .from("user_profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "admin") {
-      return NextResponse.json(
-        { error: "Admin access required" },
-        { status: 403 },
-      );
-    }
 
     const body = await request.json();
     const { title, description, product_id, discount_type, discount_value, min_quantity, start_date, end_date } = body;

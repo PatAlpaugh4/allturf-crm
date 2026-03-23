@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, requireAdmin } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 interface RouteContext {
@@ -23,40 +23,11 @@ export const GET = withApiProtection(async (_request: Request, ctx?: RouteContex
 
 // PUT: Update promotion (admin only)
 export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext) => {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.error;
+
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
-
-  // Admin check
-  const authHeader = request.headers.get("authorization");
-  const token =
-    authHeader?.replace("Bearer ", "") ||
-    request.headers
-      .get("cookie")
-      ?.match(/sb-[^=]+-auth-token=([^;]+)/)?.[1];
-
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser(token);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role !== "admin") {
-    return NextResponse.json(
-      { error: "Admin access required" },
-      { status: 403 },
-    );
-  }
 
   const body = await request.json();
   const { data, error } = await supabase
@@ -71,41 +42,12 @@ export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext
 }) as (request: Request, ctx: RouteContext) => Promise<NextResponse>;
 
 // DELETE: Deactivate promotion (admin only — soft delete via active=false)
-export const DELETE = withApiProtection(async (request: Request, ctx?: RouteContext) => {
+export const DELETE = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.error;
+
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
-
-  // Admin check
-  const authHeader = request.headers.get("authorization");
-  const token =
-    authHeader?.replace("Bearer ", "") ||
-    request.headers
-      .get("cookie")
-      ?.match(/sb-[^=]+-auth-token=([^;]+)/)?.[1];
-
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser(token);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role !== "admin") {
-    return NextResponse.json(
-      { error: "Admin access required" },
-      { status: 403 },
-    );
-  }
 
   const { error } = await supabase
     .from("promotions")
