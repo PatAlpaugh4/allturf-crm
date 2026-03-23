@@ -179,12 +179,12 @@ export default function FieldIntelPage() {
         const errData = await res.json().catch(() => ({}));
         setFetchError(errData.error || `Failed to load (${res.status})`);
       }
-    } catch (err) {
+    } catch {
       setFetchError("Network error loading field intel");
     }
 
     setLoading(false);
-  }, [profile?.id, startDate, endDate, territory]);
+  }, [profile?.id, startDate, endDate, territory, supabase.auth]);
 
   useEffect(() => {
     if (isAdmin) fetchData();
