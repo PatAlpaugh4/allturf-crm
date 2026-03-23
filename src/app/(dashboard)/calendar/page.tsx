@@ -37,17 +37,15 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  List,
   Loader2,
   MapPin,
+  Mic,
+  Pencil,
   Plus,
   Trash2,
-  Pencil,
-  Brain,
   Truck,
-  Users,
 } from "lucide-react";
-import { EVENT_TYPES, type EventType } from "@/lib/types";
+import { EVENT_TYPES } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,24 +55,26 @@ interface CalEvent {
   id: string;
   title: string;
   description: string | null;
-  event_type: EventType | "treatment_application" | "follow_up";
+  event_type: string;
   start_date: string;
   end_date: string | null;
   start_time: string | null;
   end_time: string | null;
   is_all_day: boolean;
   team_member: string | null;
-  location: string | null;
   company_id: string | null;
   contact_id: string | null;
   company_name: string | null;
   contact_name: string | null;
-  source: "calendar" | "delivery" | "treatment" | "follow_up";
+  source: "calendar" | "delivery" | "follow_up" | "ai_extracted" | "manual";
   source_id?: string;
   overdue?: boolean;
+  // For manager view: rep info
+  rep_name?: string | null;
+  rep_territory?: string | null;
 }
 
-type ViewMode = "month" | "week" | "day" | "list";
+type ViewMode = "month" | "week";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -82,25 +82,18 @@ type ViewMode = "month" | "week" | "day" | "list";
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
   site_visit: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  follow_up: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+  commitment: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
   meeting: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
   delivery: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  demo: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
-  vacation: "bg-gray-100 text-gray-600 dark:bg-gray-800/40 dark:text-gray-400",
-  networking: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
-  treatment_application: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
-  follow_up: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  follow_up_overdue: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 };
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   site_visit: "Site Visit",
+  follow_up: "Follow-up",
+  commitment: "Commitment",
   meeting: "Meeting",
   delivery: "Delivery",
-  demo: "Demo",
-  vacation: "Vacation",
-  networking: "Networking",
-  treatment_application: "Treatment",
-  follow_up: "Follow-up",
 };
 
 const MONTH_NAMES = [
@@ -111,6 +104,17 @@ const MONTH_NAMES = [
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const HOURS = Array.from({ length: 16 }, (_, i) => i + 6); // 6am–9pm
+
+// Consistent rep colors for manager view
+const REP_COLORS = [
+  "border-l-blue-500", "border-l-green-500", "border-l-purple-500",
+  "border-l-amber-500", "border-l-rose-500", "border-l-cyan-500",
+  "border-l-indigo-500", "border-l-emerald-500", "border-l-orange-500",
+  "border-l-pink-500", "border-l-teal-500", "border-l-yellow-500",
+  "border-l-fuchsia-500", "border-l-lime-500", "border-l-sky-500",
+  "border-l-violet-500", "border-l-red-500", "border-l-slate-500",
+  "border-l-zinc-500", "border-l-stone-500",
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -190,10 +194,12 @@ export default function CalendarPage() {
 
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<ViewMode>("month");
+  // Reps default to week, managers default to month
+  const [view, setView] = useState<ViewMode>(isAdmin ? "month" : "week");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [reps, setReps] = useState<Array<{ id: string; full_name: string | null }>>([]);
+  const [reps, setReps] = useState<Array<{ id: string; full_name: string | null; territory: string | null }>>([]);
   const [repFilter, setRepFilter] = useState("all");
+  const [territoryFilter, setTerritoryFilter] = useState("all");
 
   // Event detail
   const [selectedEvent, setSelectedEvent] = useState<CalEvent | null>(null);
@@ -203,11 +209,27 @@ export default function CalendarPage() {
   const [createDate, setCreateDate] = useState("");
   const [createTime, setCreateTime] = useState("");
 
-  // Visit briefing
-  const [briefingLoading, setBriefingLoading] = useState(false);
 
   const calYear = currentDate.getFullYear();
   const calMonth = currentDate.getMonth();
+
+  // Build rep color map for consistent coloring
+  const repColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    reps.forEach((r, i) => {
+      if (r.full_name) map.set(r.full_name, REP_COLORS[i % REP_COLORS.length]);
+    });
+    return map;
+  }, [reps]);
+
+  // Territories for filter
+  const territories = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of reps) {
+      if (r.territory) set.add(r.territory);
+    }
+    return Array.from(set).sort();
+  }, [reps]);
 
   // ------ Data loading ------
 
@@ -219,21 +241,13 @@ export default function CalendarPage() {
       rangeStart = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-01`;
       const lastDay = new Date(calYear, calMonth + 1, 0).getDate();
       rangeEnd = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${lastDay}`;
-    } else if (view === "week") {
+    } else {
       const wd = getWeekDates(currentDate);
       rangeStart = wd[0];
       rangeEnd = wd[6];
-    } else if (view === "day") {
-      rangeStart = toDateStr(currentDate);
-      rangeEnd = rangeStart;
-    } else {
-      rangeStart = toDateStr(currentDate);
-      const end = new Date(currentDate);
-      end.setDate(end.getDate() + 30);
-      rangeEnd = toDateStr(end);
     }
 
-    const [calRes, dealRes, taskRes, followUpRes] = await Promise.all([
+    const [calRes, dealRes, followUpRes] = await Promise.all([
       // 1. calendar_events
       supabase
         .from("calendar_events")
@@ -252,15 +266,7 @@ export default function CalendarPage() {
         .gte("expected_delivery_date", rangeStart)
         .lte("expected_delivery_date", rangeEnd),
 
-      // 3. Treatment program tasks
-      supabase
-        .from("project_tasks")
-        .select("id, title, application_date, target_area, project:projects(id, name, company:companies(id, name), assigned_rep_id)")
-        .not("application_date", "is", null)
-        .gte("application_date", rangeStart)
-        .lte("application_date", rangeEnd),
-
-      // 4. Contact follow-ups
+      // 3. Contact follow-ups
       supabase
         .from("contacts")
         .select("id, first_name, last_name, next_follow_up, company:companies(id, name)")
@@ -269,6 +275,13 @@ export default function CalendarPage() {
         .lte("next_follow_up", rangeEnd),
     ]);
 
+    // Build rep name lookup
+    const repMap = new Map<string, { name: string; territory: string | null }>();
+    for (const r of reps) {
+      if (r.full_name) repMap.set(r.full_name, { name: r.full_name, territory: r.territory });
+      repMap.set(r.id, { name: r.full_name || "Unknown", territory: r.territory });
+    }
+
     const all: CalEvent[] = [];
 
     // Calendar events
@@ -276,23 +289,25 @@ export default function CalendarPage() {
       for (const e of calRes.data) {
         const co = e.company as { id: string; name: string } | null;
         const ct = e.contact as { id: string; first_name: string; last_name: string } | null;
+        const repInfo = e.team_member ? repMap.get(e.team_member) : null;
         all.push({
           id: e.id,
           title: e.title,
           description: e.description,
-          event_type: e.event_type as EventType,
+          event_type: e.event_type,
           start_date: e.start_date,
           end_date: e.end_date,
           start_time: e.start_time,
           end_time: e.end_time,
           is_all_day: e.is_all_day,
           team_member: e.team_member,
-          location: e.location,
           company_id: co?.id ?? null,
           contact_id: ct?.id ?? null,
           company_name: co?.name ?? null,
           contact_name: ct ? `${ct.first_name} ${ct.last_name}` : null,
-          source: "calendar",
+          source: e.source || "manual",
+          rep_name: e.team_member || null,
+          rep_territory: repInfo?.territory || null,
         });
       }
     }
@@ -302,6 +317,7 @@ export default function CalendarPage() {
       for (const d of dealRes.data) {
         const co = d.company as unknown as { id: string; name: string } | null;
         const ct = d.contact as unknown as { id: string; first_name: string; last_name: string } | null;
+        const repInfo = d.assigned_rep_id ? repMap.get(d.assigned_rep_id) : null;
         all.push({
           id: `deal-${d.id}`,
           title: `Delivery: ${d.name}`,
@@ -312,40 +328,15 @@ export default function CalendarPage() {
           start_time: null,
           end_time: null,
           is_all_day: true,
-          team_member: d.assigned_rep_id,
-          location: null,
+          team_member: repInfo?.name ?? d.assigned_rep_id,
           company_id: co?.id ?? null,
           contact_id: ct?.id ?? null,
           company_name: co?.name ?? null,
           contact_name: ct ? `${ct.first_name} ${ct.last_name}` : null,
           source: "delivery",
           source_id: d.id,
-        });
-      }
-    }
-
-    // Treatment tasks
-    if (taskRes.data) {
-      for (const t of taskRes.data) {
-        const proj = t.project as unknown as { id: string; name: string; company: { id: string; name: string } | null; assigned_rep_id: string | null } | null;
-        all.push({
-          id: `task-${t.id}`,
-          title: t.title,
-          description: t.target_area ? `Target: ${t.target_area}` : null,
-          event_type: "treatment_application",
-          start_date: t.application_date!,
-          end_date: null,
-          start_time: null,
-          end_time: null,
-          is_all_day: true,
-          team_member: proj?.assigned_rep_id ?? null,
-          location: null,
-          company_id: proj?.company?.id ?? null,
-          contact_id: null,
-          company_name: proj?.company?.name ?? null,
-          contact_name: null,
-          source: "treatment",
-          source_id: t.id,
+          rep_name: repInfo?.name ?? null,
+          rep_territory: repInfo?.territory ?? null,
         });
       }
     }
@@ -366,7 +357,6 @@ export default function CalendarPage() {
           end_time: null,
           is_all_day: true,
           team_member: null,
-          location: null,
           company_id: co?.id ?? null,
           contact_id: c.id,
           company_name: co?.name ?? null,
@@ -380,7 +370,7 @@ export default function CalendarPage() {
 
     setEvents(all);
     setLoading(false);
-  }, [supabase, calYear, calMonth, view, currentDate]);
+  }, [supabase, calYear, calMonth, view, currentDate, reps]);
 
   useEffect(() => {
     loadEvents();
@@ -391,7 +381,7 @@ export default function CalendarPage() {
     if (!isAdmin) return;
     supabase
       .from("user_profiles")
-      .select("id, full_name")
+      .select("id, full_name, territory")
       .eq("is_active", true)
       .order("full_name")
       .then(({ data }) => {
@@ -402,9 +392,32 @@ export default function CalendarPage() {
   // ------ Filtered events ------
 
   const filteredEvents = useMemo(() => {
-    if (repFilter === "all") return events;
-    return events.filter((e) => e.team_member === repFilter || !e.team_member);
-  }, [events, repFilter]);
+    let result = events;
+
+    // Rep filter (manager only)
+    if (repFilter !== "all") {
+      const repInfo = reps.find((r) => r.id === repFilter);
+      const repName = repInfo?.full_name;
+      result = result.filter((e) =>
+        e.team_member === repFilter || e.team_member === repName || !e.team_member
+      );
+    }
+
+    // Territory filter (manager only)
+    if (territoryFilter !== "all") {
+      // Find rep names in this territory
+      const territoryReps = new Set(
+        reps.filter((r) => r.territory === territoryFilter).map((r) => r.full_name)
+      );
+      result = result.filter((e) =>
+        (e.rep_name && territoryReps.has(e.rep_name)) ||
+        (e.rep_territory === territoryFilter) ||
+        !e.team_member
+      );
+    }
+
+    return result;
+  }, [events, repFilter, territoryFilter, reps]);
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalEvent[]>();
@@ -423,16 +436,14 @@ export default function CalendarPage() {
   const goPrev = () => {
     const d = new Date(currentDate);
     if (view === "month") d.setMonth(d.getMonth() - 1);
-    else if (view === "week") d.setDate(d.getDate() - 7);
-    else d.setDate(d.getDate() - 1);
+    else d.setDate(d.getDate() - 7);
     setCurrentDate(d);
   };
 
   const goNext = () => {
     const d = new Date(currentDate);
     if (view === "month") d.setMonth(d.getMonth() + 1);
-    else if (view === "week") d.setDate(d.getDate() + 7);
-    else d.setDate(d.getDate() + 1);
+    else d.setDate(d.getDate() + 7);
     setCurrentDate(d);
   };
 
@@ -448,46 +459,25 @@ export default function CalendarPage() {
   };
 
   const handleDelete = async (event: CalEvent) => {
-    if (event.source !== "calendar") return;
+    if (event.source === "delivery" || event.source === "follow_up") return;
+    if (event.id.startsWith("deal-") || event.id.startsWith("followup-")) return;
     await supabase.from("calendar_events").delete().eq("id", event.id);
     setSelectedEvent(null);
     loadEvents();
   };
 
-  const handleVisitPrep = async (companyId: string) => {
-    setBriefingLoading(true);
-    try {
-      await fetch("/api/turf/visit-prep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ course_id: companyId }),
-      });
-    } catch {
-      // silently fail
-    } finally {
-      setBriefingLoading(false);
-    }
-  };
 
   // ------ Title ------
 
   const viewTitle = useMemo(() => {
     if (view === "month") return `${MONTH_NAMES[calMonth]} ${calYear}`;
-    if (view === "week") {
-      const wd = getWeekDates(currentDate);
-      const s = new Date(wd[0] + "T12:00:00");
-      const e = new Date(wd[6] + "T12:00:00");
-      if (s.getMonth() === e.getMonth()) {
-        return `${MONTH_NAMES[s.getMonth()]} ${s.getDate()}–${e.getDate()}, ${calYear}`;
-      }
-      return `${MONTH_NAMES[s.getMonth()]} ${s.getDate()} – ${MONTH_NAMES[e.getMonth()]} ${e.getDate()}, ${calYear}`;
+    const wd = getWeekDates(currentDate);
+    const s = new Date(wd[0] + "T12:00:00");
+    const e = new Date(wd[6] + "T12:00:00");
+    if (s.getMonth() === e.getMonth()) {
+      return `${MONTH_NAMES[s.getMonth()]} ${s.getDate()}–${e.getDate()}, ${calYear}`;
     }
-    if (view === "day") {
-      return currentDate.toLocaleDateString("en-CA", {
-        weekday: "long", month: "long", day: "numeric", year: "numeric",
-      });
-    }
-    return "Upcoming 30 Days";
+    return `${MONTH_NAMES[s.getMonth()]} ${s.getDate()} – ${MONTH_NAMES[e.getMonth()]} ${e.getDate()}, ${calYear}`;
   }, [view, calMonth, calYear, currentDate]);
 
   return (
@@ -512,15 +502,14 @@ export default function CalendarPage() {
       {/* Controls */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="flex rounded-lg border overflow-hidden">
-          {(["month", "week", "day", "list"] as ViewMode[]).map((v) => (
+          {(["month", "week"] as ViewMode[]).map((v) => (
             <Button
               key={v}
               variant={view === v ? "default" : "ghost"}
               size="sm"
-              className="rounded-none capitalize text-xs px-3"
+              className="rounded-none capitalize text-xs px-4"
               onClick={() => setView(v)}
             >
-              {v === "list" && <List className="h-3.5 w-3.5 mr-1" />}
               {v}
             </Button>
           ))}
@@ -533,18 +522,35 @@ export default function CalendarPage() {
           <span className="text-sm font-semibold ml-1">{viewTitle}</span>
         </div>
 
+        {/* Manager filters */}
         {isAdmin && reps.length > 0 && (
-          <Select value={repFilter} onValueChange={setRepFilter}>
-            <SelectTrigger className="w-[180px] sm:ml-auto">
-              <SelectValue placeholder="All Reps" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Reps</SelectItem>
-              {reps.map((r) => (
-                <SelectItem key={r.id} value={r.id}>{r.full_name || "Unnamed"}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <Select value={repFilter} onValueChange={setRepFilter}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="All Reps" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Reps</SelectItem>
+                {reps.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{r.full_name || "Unnamed"}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {territories.length > 0 && (
+              <Select value={territoryFilter} onValueChange={setTerritoryFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="All Territories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Territories</SelectItem>
+                  {territories.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         )}
       </div>
 
@@ -562,6 +568,8 @@ export default function CalendarPage() {
               eventsByDate={eventsByDate}
               onEventClick={setSelectedEvent}
               onDayClick={(d) => openCreate(d)}
+              showRepName={isAdmin && repFilter === "all"}
+              repColorMap={repColorMap}
             />
           )}
           {view === "week" && (
@@ -570,17 +578,9 @@ export default function CalendarPage() {
               eventsByDate={eventsByDate}
               onEventClick={setSelectedEvent}
               onSlotClick={(d, t) => openCreate(d, t)}
+              showRepName={isAdmin && repFilter === "all"}
+              repColorMap={repColorMap}
             />
-          )}
-          {view === "day" && (
-            <DayView
-              events={eventsByDate.get(toDateStr(currentDate)) || []}
-              onEventClick={setSelectedEvent}
-              onSlotClick={(t) => openCreate(toDateStr(currentDate), t)}
-            />
-          )}
-          {view === "list" && (
-            <ListView events={filteredEvents} onEventClick={setSelectedEvent} />
           )}
         </>
       )}
@@ -596,14 +596,6 @@ export default function CalendarPage() {
             <EventDetail
               event={selectedEvent}
               onDelete={() => handleDelete(selectedEvent)}
-              onEdit={() => {
-                setSelectedEvent(null);
-                setCreateDate(selectedEvent.start_date);
-                setCreateTime(selectedEvent.start_time || "");
-                setCreateOpen(true);
-              }}
-              onVisitPrep={handleVisitPrep}
-              briefingLoading={briefingLoading}
             />
           )}
         </SheetContent>
@@ -623,17 +615,30 @@ export default function CalendarPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Source Icon (AI vs Manual)
+// ---------------------------------------------------------------------------
+
+function SourceIcon({ source, className = "h-3 w-3" }: { source: string; className?: string }) {
+  if (source === "ai_extracted") {
+    return <span title="AI-generated from call"><Mic className={`${className} text-primary/70`} /></span>;
+  }
+  return <span title="Manually created"><Pencil className={`${className} text-muted-foreground/50`} /></span>;
+}
+
+// ---------------------------------------------------------------------------
 // Month View
 // ---------------------------------------------------------------------------
 
 function MonthView({
-  year, month, eventsByDate, onEventClick, onDayClick,
+  year, month, eventsByDate, onEventClick, onDayClick, showRepName, repColorMap,
 }: {
   year: number;
   month: number;
   eventsByDate: Map<string, CalEvent[]>;
   onEventClick: (e: CalEvent) => void;
   onDayClick: (dateStr: string) => void;
+  showRepName: boolean;
+  repColorMap: Map<string, string>;
 }) {
   const cells = getMonthDays(year, month);
   const today = todayStr();
@@ -666,19 +671,23 @@ function MonthView({
                     </span>
                     {dayEvts && (
                       <div className="mt-0.5 space-y-0.5">
-                        {dayEvts.slice(0, 3).map((e) => (
-                          <button
-                            key={e.id}
-                            type="button"
-                            className={`w-full text-left px-1 py-0.5 rounded text-[10px] truncate ${
-                              e.overdue ? EVENT_TYPE_COLORS.follow_up_overdue : EVENT_TYPE_COLORS[e.event_type] || "bg-blue-50 text-blue-700"
-                            }`}
-                            onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
-                          >
-                            {e.start_time && <span className="font-medium">{formatTime(e.start_time).split(" ")[0]} </span>}
-                            {e.title}
-                          </button>
-                        ))}
+                        {dayEvts.slice(0, 3).map((e) => {
+                          const repColor = showRepName && e.rep_name ? repColorMap.get(e.rep_name) : undefined;
+                          return (
+                            <button
+                              key={e.id}
+                              type="button"
+                              className={`w-full text-left px-1 py-0.5 rounded text-[10px] truncate flex items-center gap-0.5 ${
+                                repColor ? `border-l-2 ${repColor} ` : ""
+                              }${e.overdue ? EVENT_TYPE_COLORS.commitment : EVENT_TYPE_COLORS[e.event_type] || "bg-blue-50 text-blue-700"}`}
+                              onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
+                            >
+                              <SourceIcon source={e.source} className="h-2.5 w-2.5 shrink-0" />
+                              {e.start_time && <span className="font-medium">{formatTime(e.start_time).split(" ")[0]} </span>}
+                              <span className="truncate">{e.title}</span>
+                            </button>
+                          );
+                        })}
                         {dayEvts.length > 3 && (
                           <span className="text-[10px] text-muted-foreground px-1">+{dayEvts.length - 3} more</span>
                         )}
@@ -700,12 +709,14 @@ function MonthView({
 // ---------------------------------------------------------------------------
 
 function WeekView({
-  currentDate, eventsByDate, onEventClick, onSlotClick,
+  currentDate, eventsByDate, onEventClick, onSlotClick, showRepName, repColorMap,
 }: {
   currentDate: Date;
   eventsByDate: Map<string, CalEvent[]>;
   onEventClick: (e: CalEvent) => void;
   onSlotClick: (dateStr: string, time: string) => void;
+  showRepName: boolean;
+  repColorMap: Map<string, string>;
 }) {
   const weekDates = getWeekDates(currentDate);
 
@@ -730,19 +741,26 @@ function WeekView({
               const allDay = (eventsByDate.get(ds) || []).filter((e) => e.is_all_day);
               return (
                 <div key={ds} className="min-h-[24px] space-y-0.5 px-0.5">
-                  {allDay.slice(0, 2).map((e) => (
-                    <button
-                      key={e.id}
-                      type="button"
-                      className={`w-full text-left px-1 py-0.5 rounded text-[10px] truncate ${
-                        e.overdue ? EVENT_TYPE_COLORS.follow_up_overdue : EVENT_TYPE_COLORS[e.event_type] || ""
-                      }`}
-                      onClick={() => onEventClick(e)}
-                    >
-                      {e.title}
-                    </button>
-                  ))}
-                  {allDay.length > 2 && <span className="text-[9px] text-muted-foreground">+{allDay.length - 2}</span>}
+                  {allDay.slice(0, 3).map((e) => {
+                    const repColor = showRepName && e.rep_name ? repColorMap.get(e.rep_name) : undefined;
+                    return (
+                      <button
+                        key={e.id}
+                        type="button"
+                        className={`w-full text-left px-1 py-0.5 rounded text-[10px] truncate flex items-center gap-0.5 ${
+                          repColor ? `border-l-2 ${repColor} ` : ""
+                        }${e.overdue ? EVENT_TYPE_COLORS.commitment : EVENT_TYPE_COLORS[e.event_type] || ""}`}
+                        onClick={() => onEventClick(e)}
+                      >
+                        <SourceIcon source={e.source} className="h-2.5 w-2.5 shrink-0" />
+                        <span className="truncate">{e.title}</span>
+                      </button>
+                    );
+                  })}
+                  {allDay.length > 3 && <span className="text-[9px] text-muted-foreground">+{allDay.length - 3}</span>}
+                  {showRepName && allDay.length > 0 && allDay[0].rep_name && (
+                    <span className="text-[9px] text-muted-foreground/60 truncate block">{allDay[0].rep_name}</span>
+                  )}
                 </div>
               );
             })}
@@ -764,16 +782,22 @@ function WeekView({
                     className="min-h-[40px] px-0.5 py-0.5 cursor-pointer hover:bg-accent/30 transition-colors"
                     onClick={() => onSlotClick(ds, `${String(hour).padStart(2, "0")}:00`)}
                   >
-                    {hourEvts.map((e) => (
-                      <button
-                        key={e.id}
-                        type="button"
-                        className={`w-full text-left px-1 py-0.5 rounded text-[10px] truncate mb-0.5 ${EVENT_TYPE_COLORS[e.event_type] || ""}`}
-                        onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
-                      >
-                        {formatTime(e.start_time)} {e.title}
-                      </button>
-                    ))}
+                    {hourEvts.map((e) => {
+                      const repColor = showRepName && e.rep_name ? repColorMap.get(e.rep_name) : undefined;
+                      return (
+                        <button
+                          key={e.id}
+                          type="button"
+                          className={`w-full text-left px-1 py-0.5 rounded text-[10px] truncate mb-0.5 flex items-center gap-0.5 ${
+                            repColor ? `border-l-2 ${repColor} ` : ""
+                          }${EVENT_TYPE_COLORS[e.event_type] || ""}`}
+                          onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
+                        >
+                          <SourceIcon source={e.source} className="h-2.5 w-2.5 shrink-0" />
+                          <span className="truncate">{formatTime(e.start_time)} {e.title}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -786,159 +810,18 @@ function WeekView({
 }
 
 // ---------------------------------------------------------------------------
-// Day View
-// ---------------------------------------------------------------------------
-
-function DayView({
-  events: dayEvents, onEventClick, onSlotClick,
-}: {
-  events: CalEvent[];
-  onEventClick: (e: CalEvent) => void;
-  onSlotClick: (time: string) => void;
-}) {
-  const allDay = dayEvents.filter((e) => e.is_all_day);
-  const timed = dayEvents.filter((e) => !e.is_all_day);
-
-  return (
-    <Card>
-      <CardContent className="pt-4">
-        {allDay.length > 0 && (
-          <div className="mb-3">
-            <p className="text-xs text-muted-foreground mb-1">All Day</p>
-            <div className="flex flex-wrap gap-1.5">
-              {allDay.map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  className={`px-2 py-1 rounded text-xs ${
-                    e.overdue ? EVENT_TYPE_COLORS.follow_up_overdue : EVENT_TYPE_COLORS[e.event_type] || ""
-                  }`}
-                  onClick={() => onEventClick(e)}
-                >
-                  {e.title}
-                  {e.company_name && <span className="ml-1 opacity-70">· {e.company_name}</span>}
-                </button>
-              ))}
-            </div>
-            <Separator className="mt-3" />
-          </div>
-        )}
-
-        {HOURS.map((hour) => {
-          const hourEvts = timed.filter((e) => parseTime(e.start_time) === hour);
-          return (
-            <div
-              key={hour}
-              className="flex border-t border-border/30 min-h-[48px] cursor-pointer hover:bg-accent/30 transition-colors"
-              onClick={() => onSlotClick(`${String(hour).padStart(2, "0")}:00`)}
-            >
-              <div className="w-16 shrink-0 text-xs text-muted-foreground py-2 text-right pr-3">
-                {formatHourLabel(hour)}
-              </div>
-              <div className="flex-1 py-1 space-y-1">
-                {hourEvts.map((e) => (
-                  <button
-                    key={e.id}
-                    type="button"
-                    className={`w-full text-left px-3 py-1.5 rounded text-sm ${EVENT_TYPE_COLORS[e.event_type] || ""}`}
-                    onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
-                  >
-                    <span className="font-medium">{formatTime(e.start_time)}</span>
-                    {e.end_time && <span className="text-xs opacity-70"> – {formatTime(e.end_time)}</span>}
-                    <span className="ml-2">{e.title}</span>
-                    {e.company_name && <span className="ml-1.5 opacity-70 text-xs">· {e.company_name}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// List View
-// ---------------------------------------------------------------------------
-
-function ListView({ events, onEventClick }: { events: CalEvent[]; onEventClick: (e: CalEvent) => void }) {
-  const grouped = useMemo(() => {
-    const map = new Map<string, CalEvent[]>();
-    const sorted = [...events].sort((a, b) => {
-      if (a.start_date !== b.start_date) return a.start_date.localeCompare(b.start_date);
-      return (a.start_time || "").localeCompare(b.start_time || "");
-    });
-    for (const e of sorted) {
-      const list = map.get(e.start_date) || [];
-      list.push(e);
-      map.set(e.start_date, list);
-    }
-    return map;
-  }, [events]);
-
-  if (events.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-12 text-center text-muted-foreground">No upcoming events</CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {Array.from(grouped.entries()).map(([dateStr, dayEvts]) => (
-        <div key={dateStr}>
-          <p className={`text-xs font-semibold mb-1.5 ${isToday(dateStr) ? "text-primary" : "text-muted-foreground"}`}>
-            {isToday(dateStr) ? "Today · " : ""}{formatDateHeader(dateStr)}
-          </p>
-          <div className="space-y-1">
-            {dayEvts.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                className="w-full text-left flex items-center gap-3 rounded-lg border p-3 hover:bg-accent/50 transition-colors"
-                onClick={() => onEventClick(e)}
-              >
-                <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${
-                  e.overdue ? "bg-red-500" : (EVENT_TYPE_COLORS[e.event_type] || "bg-blue-500").split(" ")[0]
-                }`} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{e.title}</p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    {e.start_time && <span>{formatTime(e.start_time)}</span>}
-                    {e.company_name && <span>· {e.company_name}</span>}
-                    {e.overdue && <Badge className="text-[9px] h-4 bg-red-100 text-red-700">Overdue</Badge>}
-                  </div>
-                </div>
-                <Badge className={`text-[10px] h-5 shrink-0 ${
-                  e.overdue ? EVENT_TYPE_COLORS.follow_up_overdue : EVENT_TYPE_COLORS[e.event_type] || ""
-                }`}>
-                  {EVENT_TYPE_LABELS[e.event_type] || e.event_type}
-                </Badge>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Event Detail (Sheet)
 // ---------------------------------------------------------------------------
 
 function EventDetail({
-  event, onDelete, onEdit, onVisitPrep, briefingLoading,
+  event, onDelete,
 }: {
   event: CalEvent;
   onDelete: () => void;
-  onEdit: () => void;
-  onVisitPrep: (companyId: string) => void;
-  briefingLoading: boolean;
 }) {
-  const typeColor = event.overdue ? EVENT_TYPE_COLORS.follow_up_overdue : EVENT_TYPE_COLORS[event.event_type] || "";
+  const typeColor = event.overdue ? EVENT_TYPE_COLORS.commitment : EVENT_TYPE_COLORS[event.event_type] || "";
+  const isEditable = !event.id.startsWith("deal-") && !event.id.startsWith("followup-");
+  const isAI = event.source === "ai_extracted";
 
   return (
     <div className="mt-4 space-y-4">
@@ -947,7 +830,15 @@ function EventDetail({
           <h3 className="text-lg font-semibold">{event.title}</h3>
           <Badge className={typeColor}>{EVENT_TYPE_LABELS[event.event_type] || event.event_type}</Badge>
         </div>
-        {event.overdue && <Badge className="mt-1 bg-red-100 text-red-700">Overdue</Badge>}
+        <div className="flex items-center gap-2 mt-1">
+          {isAI && (
+            <Badge variant="outline" className="text-[10px] h-5 gap-1">
+              <Mic className="h-3 w-3" />
+              AI Generated
+            </Badge>
+          )}
+          {event.overdue && <Badge className="bg-red-100 text-red-700">Overdue</Badge>}
+        </div>
       </div>
 
       <Separator />
@@ -984,10 +875,10 @@ function EventDetail({
             <p className="font-medium">{event.contact_name}</p>
           </div>
         )}
-        {event.location && (
-          <div className="col-span-2">
-            <p className="text-muted-foreground">Location</p>
-            <p className="font-medium">{event.location}</p>
+        {event.rep_name && (
+          <div>
+            <p className="text-muted-foreground">Rep</p>
+            <p className="font-medium">{event.rep_name}</p>
           </div>
         )}
       </div>
@@ -1005,20 +896,9 @@ function EventDetail({
       <Separator />
 
       <div className="flex flex-wrap gap-2">
-        {event.event_type === "site_visit" && event.company_id && (
-          <Button size="sm" variant="outline" className="gap-1.5" disabled={briefingLoading} onClick={() => onVisitPrep(event.company_id!)}>
-            {briefingLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
-            Prep for Visit
-          </Button>
-        )}
         {event.source === "delivery" && (
           <Button size="sm" variant="outline" className="gap-1.5" asChild>
             <Link href="/pipeline"><Truck className="h-3.5 w-3.5" />View Deal</Link>
-          </Button>
-        )}
-        {event.source === "follow_up" && (
-          <Button size="sm" variant="outline" className="gap-1.5" asChild>
-            <Link href="/contacts"><Users className="h-3.5 w-3.5" />View Contact</Link>
           </Button>
         )}
         {event.company_id && (
@@ -1026,21 +906,20 @@ function EventDetail({
             <Link href={`/courses/${event.company_id}`}><MapPin className="h-3.5 w-3.5" />View Course</Link>
           </Button>
         )}
-        {event.source === "calendar" && (
-          <>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={onEdit}>
-              <Pencil className="h-3.5 w-3.5" />Edit
-            </Button>
-            <Button size="sm" variant="outline" className="gap-1.5 text-destructive hover:bg-destructive/10" onClick={onDelete}>
-              <Trash2 className="h-3.5 w-3.5" />Delete
-            </Button>
-          </>
+        {isEditable && (
+          <Button size="sm" variant="outline" className="gap-1.5 text-destructive hover:bg-destructive/10" onClick={onDelete}>
+            <Trash2 className="h-3.5 w-3.5" />Delete
+          </Button>
         )}
       </div>
 
       <div className="pt-2">
-        <p className="text-[11px] text-muted-foreground">
-          Source: {event.source === "calendar" ? "Calendar Event" : event.source === "delivery" ? "Deal Delivery" : event.source === "treatment" ? "Treatment Program" : "Contact Follow-up"}
+        <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+          <SourceIcon source={event.source} className="h-3 w-3" />
+          {event.source === "ai_extracted" ? "Auto-generated from call" :
+           event.source === "delivery" ? "Deal delivery" :
+           event.source === "follow_up" ? "Contact follow-up" :
+           "Manually created"}
         </p>
       </div>
     </div>
@@ -1048,7 +927,7 @@ function EventDetail({
 }
 
 // ---------------------------------------------------------------------------
-// Create Event Dialog
+// Create Event Dialog (Simplified)
 // ---------------------------------------------------------------------------
 
 function CreateEventDialog({
@@ -1064,15 +943,12 @@ function CreateEventDialog({
   const supabase = createBrowserClient();
 
   const [title, setTitle] = useState("");
-  const [eventType, setEventType] = useState<string>("meeting");
+  const [eventType, setEventType] = useState<string>("site_visit");
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [isAllDay, setIsAllDay] = useState(false);
   const [description, setDescription] = useState("");
   const [companyId, setCompanyId] = useState("");
   const [contactId, setContactId] = useState("");
-  const [location, setLocation] = useState("");
 
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [contacts, setContacts] = useState<Array<{ id: string; first_name: string; last_name: string }>>([]);
@@ -1082,15 +958,12 @@ function CreateEventDialog({
   useEffect(() => {
     if (open) {
       setTitle("");
-      setEventType("meeting");
+      setEventType("site_visit");
       setStartDate(defaultDate || todayStr());
       setStartTime(defaultTime || "");
-      setEndTime("");
-      setIsAllDay(!defaultTime);
       setDescription("");
       setCompanyId("");
       setContactId("");
-      setLocation("");
       setError("");
     }
   }, [open, defaultDate, defaultTime]);
@@ -1114,21 +987,24 @@ function CreateEventDialog({
 
   const handleSave = async () => {
     if (!title.trim()) { setError("Title is required."); return; }
+    if (!startDate) { setError("Date is required."); return; }
     setSaving(true);
     setError("");
+
+    // Site visits default to all-day, meetings are timed
+    const isAllDay = eventType === "site_visit" || eventType === "delivery" || !startTime;
 
     const { error: err } = await supabase.from("calendar_events").insert({
       title: title.trim(),
       event_type: eventType,
       start_date: startDate,
       start_time: isAllDay ? null : startTime || null,
-      end_time: isAllDay ? null : endTime || null,
       is_all_day: isAllDay,
       team_member: teamMember,
       description: description.trim() || null,
       company_id: companyId && companyId !== "none" ? companyId : null,
       contact_id: contactId && contactId !== "none" ? contactId : null,
-      location: location.trim() || null,
+      source: "manual",
     });
 
     if (err) { setError(err.message); setSaving(false); return; }
@@ -1167,26 +1043,13 @@ function CreateEventDialog({
               <Label htmlFor="ce-date">Date *</Label>
               <Input id="ce-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
-            <div className="space-y-1.5 flex items-end">
-              <label className="flex items-center gap-2 text-sm cursor-pointer pb-2">
-                <input type="checkbox" className="h-4 w-4 rounded" checked={isAllDay} onChange={(e) => setIsAllDay(e.target.checked)} />
-                All day
-              </label>
-            </div>
+            {eventType !== "site_visit" && eventType !== "delivery" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ce-time">Time</Label>
+                <Input id="ce-time" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+              </div>
+            )}
           </div>
-
-          {!isAllDay && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="ce-start">Start Time</Label>
-                <Input id="ce-start" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ce-end">End Time</Label>
-                <Input id="ce-end" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-              </div>
-            </div>
-          )}
 
           <div className="space-y-1.5">
             <Label>Course</Label>
@@ -1217,13 +1080,8 @@ function CreateEventDialog({
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="ce-loc">Location</Label>
-            <Input id="ce-loc" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Optional" />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="ce-desc">Description</Label>
-            <Textarea id="ce-desc" value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[60px]" />
+            <Label htmlFor="ce-desc">Notes</Label>
+            <Textarea id="ce-desc" value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[60px]" placeholder="Optional notes" />
           </div>
 
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

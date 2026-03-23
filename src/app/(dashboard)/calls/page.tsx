@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase";
 import {
   Table,
@@ -33,7 +32,6 @@ import {
   ChevronRight,
   Loader2,
   Phone,
-  Plus,
   Search,
 } from "lucide-react";
 import {
@@ -90,7 +88,6 @@ export default function CallLogsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedLog, setSelectedLog] = useState<CallLogRow | null>(null);
-  const router = useRouter();
   const supabase = createBrowserClient();
 
   const loadLogs = useCallback(async () => {
@@ -187,9 +184,9 @@ export default function CallLogsPage() {
         <Button
           size="sm"
           className="gap-2 min-h-[44px]"
-          onClick={() => router.push("/calls/new")}
+          onClick={() => window.dispatchEvent(new CustomEvent("open-call-capture"))}
         >
-          <Plus className="h-4 w-4" />
+          <Phone className="h-4 w-4" />
           Log Call
         </Button>
       </div>

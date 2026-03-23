@@ -10,9 +10,11 @@ import {
   ArrowRight,
   Calendar,
   MapPin,
-  Users,
+  Mic,
+  Pencil,
   Truck,
-  FlaskConical,
+  Users,
+  CircleAlert,
 } from "lucide-react";
 
 interface CalendarEvent {
@@ -21,6 +23,7 @@ interface CalendarEvent {
   event_type: string;
   start_date: string;
   start_time: string | null;
+  source: string | null;
   company: { name: string } | null;
 }
 
@@ -28,9 +31,8 @@ const EVENT_ICONS: Record<string, typeof Calendar> = {
   site_visit: MapPin,
   delivery: Truck,
   meeting: Users,
-  demo: FlaskConical,
-  networking: Users,
-  vacation: Calendar,
+  follow_up: Calendar,
+  commitment: CircleAlert,
 };
 
 export function UpcomingEventsCard() {
@@ -47,12 +49,12 @@ export function UpcomingEventsCard() {
 
       const { data } = await supabase
         .from("calendar_events")
-        .select("id, title, event_type, start_date, start_time, company:companies(name)")
+        .select("id, title, event_type, start_date, start_time, source, company:companies(name)")
         .eq("team_member", profile!.full_name || profile!.email)
         .gte("start_date", today)
         .order("start_date", { ascending: true })
         .order("start_time", { ascending: true })
-        .limit(3);
+        .limit(5);
 
       if (data) setEvents(data as unknown as CalendarEvent[]);
       setLoading(false);
@@ -74,6 +76,8 @@ export function UpcomingEventsCard() {
       <CardContent className="space-y-2">
         {events.map((evt) => {
           const Icon = EVENT_ICONS[evt.event_type] || Calendar;
+          const isAI = evt.source === "ai_extracted";
+          const SourceIcon = isAI ? Mic : Pencil;
           const dateStr = new Date(evt.start_date + "T12:00:00Z").toLocaleDateString("en-CA", {
             weekday: "short",
             month: "short",
@@ -86,7 +90,10 @@ export function UpcomingEventsCard() {
                 <Icon className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{evt.title}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-medium truncate">{evt.title}</p>
+                  <span title={isAI ? "AI-generated from call" : "Manually created"}><SourceIcon className="h-3 w-3 shrink-0 text-muted-foreground/60" /></span>
+                </div>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
                   <span>{dateStr}{evt.start_time ? ` at ${evt.start_time.slice(0, 5)}` : ""}</span>
                   {evt.company?.name && (

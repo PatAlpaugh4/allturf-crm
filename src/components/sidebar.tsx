@@ -13,10 +13,8 @@ import {
   FlaskConical,
   Kanban,
   PhoneCall,
-  Route,
   Sprout,
   CalendarDays,
-  FileBarChart,
   FileText,
   Menu,
   LogOut,
@@ -40,15 +38,13 @@ const navLinks: NavLink[] = [
   { href: "/dashboard",   label: "Dashboard",   icon: LayoutDashboard },
   { href: "/calls",       label: "Calls",       icon: PhoneCall },
   { href: "/nudges",      label: "Nudges",      icon: Bell },
-  { href: "/digest",      label: "Digest",      icon: FileText },
+  { href: "/calendar",    label: "Calendar",    icon: CalendarDays },
+  { href: "/digest",      label: "Digest",      icon: FileText, adminOnly: true },
   { href: "/field-intel", label: "Field Intel",  icon: Activity, adminOnly: true },
   { href: "/courses",     label: "Courses",     icon: MapPin },
   { href: "/contacts",    label: "Contacts",    icon: Users },
-  { href: "/visits",      label: "Visits",      icon: Route },
   { href: "/pipeline",    label: "Deals",       icon: Kanban },
   { href: "/products",    label: "Products",    icon: FlaskConical },
-  { href: "/calendar",    label: "Calendar",    icon: CalendarDays },
-  { href: "/reports",     label: "Reports",     icon: FileBarChart },
 ];
 
 function NavContent({ onLinkClick }: { onLinkClick?: () => void }) {

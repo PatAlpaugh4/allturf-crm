@@ -106,12 +106,11 @@ export const TASK_PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
 export const EVENT_TYPES = [
-  'meeting',
-  'networking',
-  'vacation',
   'site_visit',
+  'follow_up',
+  'commitment',
+  'meeting',
   'delivery',
-  'demo',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -534,8 +533,6 @@ export interface Project {
   deal?: Deal | null;
 }
 
-// Alias for turf-domain UI
-export type TreatmentProgram = Project;
 
 export interface ProjectTask {
   id: string;
@@ -559,9 +556,6 @@ export interface ProjectTask {
   // Optional joined relation
   product?: Offering | null;
 }
-
-// Alias for turf-domain UI
-export type TreatmentProgramItem = ProjectTask;
 
 export interface CalendarEvent {
   id: string;
@@ -769,80 +763,6 @@ export interface TurfKnowledgeEntry {
 // ============================================================================
 // AI RESPONSE SHAPES
 // ============================================================================
-
-export interface DiagnosisResult {
-  confidence: number;
-  identified_issue: string;
-  type: DiseasePestType;
-  scientific_name: string | null;
-  symptoms_matched: string[];
-  contributing_factors: string[];
-  severity_assessment: ConditionRating;
-  recommended_products: ProductRecommendation[];
-  cultural_recommendations: string[];
-  follow_up_timeline: string;
-  requires_agronomist: boolean;
-  reasoning: string;
-}
-
-export interface ProductRecommendation {
-  product_id: string;
-  product_name: string;
-  pcp_registration_number: string | null;
-  category: ProductCategory;
-  application_rate: number;
-  application_rate_unit: string;
-  application_rate_max: number;
-  target_area: string;
-  mode_of_action: string | null;
-  moa_group: string | null;
-  efficacy: EfficacyRating;
-  is_ontario_registered: boolean;
-  tank_mix_compatible: boolean;
-  moa_rotation_safe: boolean;
-  re_entry_interval_hours: number | null;
-  rain_fast_hours: number | null;
-  notes: string | null;
-  estimated_cost_cad: number | null;
-}
-
-export interface VisitBriefing {
-  company_name: string;
-  superintendent_name: string | null;
-  course_profile_summary: string;
-  recent_weather: {
-    avg_temp_c: number | null;
-    total_rainfall_mm: number | null;
-    gdd_cumulative: number | null;
-    is_spray_window: boolean;
-  };
-  active_issues: Array<{
-    issue_name: string;
-    type: DiseasePestType;
-    severity: string;
-    first_observed: string | null;
-    current_status: string;
-  }>;
-  recent_treatments: Array<{
-    product_name: string;
-    application_date: string;
-    target_area: string;
-    moa_group: string | null;
-  }>;
-  upcoming_deliveries: Array<{
-    deal_name: string;
-    scheduled_date: string;
-    status: DeliveryStatus;
-  }>;
-  open_recommendations: Array<{
-    product_name: string;
-    priority: RecommendationPriority;
-    target_issue: string;
-  }>;
-  moa_rotation_alerts: string[];
-  seasonal_risk_factors: string[];
-  suggested_talking_points: string[];
-}
 
 // ============================================================================
 // CONSTANTS — Phase 1.3 (Sales Intelligence Layer)

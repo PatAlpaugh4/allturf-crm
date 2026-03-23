@@ -541,7 +541,7 @@ async function detectInventoryRisks(
     }
     if (productIds.length === 0) continue;
 
-    // Check active deals (seasonal programs + standard orders) for these products
+    // Check active deals for these products
     const { data: committedItems } = await supabase
       .from("deal_items")
       .select("quantity, deal:deals!inner(stage, company_id)")

@@ -11,7 +11,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Mic, Square, Keyboard, Loader2, X } from "lucide-react";
+import { Mic, Square, Keyboard, Loader2, X, Phone, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 export function CallCaptureFab() {
@@ -26,10 +26,10 @@ export function CallCaptureFab() {
 
   return (
     <>
-      {/* FAB — fixed bottom-right, above quick-check-in if present */}
+      {/* FAB — fixed bottom-right */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-24 right-6 z-50 flex items-center justify-center w-14 h-14 md:w-12 md:h-12 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl active:scale-95 transition-all md:bottom-6"
+        className="fixed bottom-6 right-6 z-50 flex items-center justify-center w-14 h-14 md:w-12 md:h-12 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl active:scale-95 transition-all"
         aria-label="Log a call"
       >
         <Mic className="h-6 w-6 md:h-5 md:w-5" />
@@ -78,6 +78,7 @@ function CallCaptureForm({ onComplete }: { onComplete: () => void }) {
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [supported, setSupported] = useState<boolean | null>(null);
+  const [isSiteVisit, setIsSiteVisit] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const transcriptRef = useRef(transcript);
@@ -193,7 +194,7 @@ function CallCaptureForm({ onComplete }: { onComplete: () => void }) {
     // Stop recording if active
     if (recording) stopRecording();
 
-    const inputType = showTextarea ? "typed" : "voice_dictation";
+    const inputType = isSiteVisit ? "site_visit" : showTextarea ? "typed" : "voice_dictation";
 
     const { data, error } = await supabase
       .from("call_logs")
@@ -225,7 +226,7 @@ function CallCaptureForm({ onComplete }: { onComplete: () => void }) {
 
       onComplete();
     }
-  }, [transcript, profile, supabase, recording, stopRecording, showTextarea, onComplete]);
+  }, [transcript, profile, supabase, recording, stopRecording, showTextarea, isSiteVisit, onComplete]);
 
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
 
@@ -317,6 +318,34 @@ function CallCaptureForm({ onComplete }: { onComplete: () => void }) {
           {wordCount} word{wordCount !== 1 ? "s" : ""}
         </p>
       )}
+
+      {/* Tag: Phone Call vs Site Visit */}
+      <div className="flex items-center justify-center gap-1 rounded-lg border bg-muted/30 p-1">
+        <button
+          type="button"
+          onClick={() => setIsSiteVisit(false)}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            !isSiteVisit
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Phone className="h-3.5 w-3.5" />
+          Phone Call
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsSiteVisit(true)}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            isSiteVisit
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <MapPin className="h-3.5 w-3.5" />
+          Site Visit
+        </button>
+      </div>
 
       {/* Toggle: voice vs type */}
       <button

@@ -11,7 +11,6 @@ import { sanitizeForPrompt } from "@/lib/api";
 import {
   matchContacts,
   matchCompanies,
-  matchDiseases,
   matchProducts,
 } from "@/lib/fuzzy-match";
 import type {
@@ -182,7 +181,6 @@ export async function processCallLog(callLogId: string): Promise<ProcessingResul
   let matchedProducts = new Map<string, { id: string; pcp_registration_number: string | null }>();
   let matchedContacts = new Map<string, { id: string; company_id: string | null }>();
   let matchedCompanies = new Map<string, { id: string }>();
-  let matchedDiseases = new Map<string, { id: string }>();
 
   try {
     const allProductNames = [
@@ -191,12 +189,11 @@ export async function processCallLog(callLogId: string): Promise<ProcessingResul
     ];
     const uniqueProductNames = Array.from(new Set(allProductNames));
 
-    [matchedProducts, matchedContacts, matchedCompanies, matchedDiseases] =
+    [matchedProducts, matchedContacts, matchedCompanies] =
       await Promise.all([
         matchProducts(uniqueProductNames, supabase),
         matchContacts(extraction.contact_names, supabase),
         matchCompanies(extraction.company_names, supabase),
-        matchDiseases(extraction.diseases_mentioned, supabase),
       ]);
   } catch (err) {
     warnings.push(`CRM matching partially failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -242,11 +239,24 @@ export async function processCallLog(callLogId: string): Promise<ProcessingResul
       callLog: { ...callLog, company_id: effectiveCompanyId, contact_id: effectiveContactId },
       extraction,
       matchedProducts,
-      matchedDiseases,
       supabase,
     });
   } catch (err) {
     warnings.push(`Nudge generation failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Step 3b: Calendar event creation from AI extraction (non-fatal)
+  try {
+    await generateCalendarEvents({
+      callLogId,
+      repId: callLog.rep_id,
+      companyId: effectiveCompanyId,
+      contactId: effectiveContactId,
+      extraction,
+      supabase,
+    });
+  } catch (err) {
+    warnings.push(`Calendar event creation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Step 4: Activity creation (non-fatal)
@@ -399,7 +409,6 @@ interface NudgeContext {
   callLog: { id: string; rep_id: string; company_id: string | null; contact_id: string | null };
   extraction: LLMExtraction;
   matchedProducts: Map<string, { id: string; pcp_registration_number: string | null }>;
-  matchedDiseases: Map<string, { id: string }>;
   supabase: ReturnType<typeof createServiceClient>;
 }
 
@@ -417,7 +426,7 @@ interface NudgeInsert {
 }
 
 async function generateNudges(ctx: NudgeContext): Promise<number> {
-  const { callLog, extraction, matchedProducts, matchedDiseases, supabase } = ctx;
+  const { callLog, extraction, matchedProducts, supabase } = ctx;
   const nudges: NudgeInsert[] = [];
 
   // Check existing active nudges to prevent duplicates (max 3 of same type per rep+company)
@@ -436,8 +445,9 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
     }
   }
 
+  // Max 3 nudges per call, max 2 of same type per rep per day
   function canAddNudge(type: NudgeType): boolean {
-    return (existingCounts.get(type) || 0) < 5 && nudges.length < 10;
+    return (existingCounts.get(type) || 0) < 2 && nudges.length < 3;
   }
 
   // Determine priority based on sentiment and follow-up urgency
@@ -491,136 +501,7 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
     }
   }
 
-  // 3. Disease mentioned → cross_sell (check product_disease_links)
-  for (const diseaseName of extraction.diseases_mentioned) {
-    if (!canAddNudge("cross_sell")) break;
-    const diseaseMatch = matchedDiseases.get(diseaseName);
-    if (!diseaseMatch) continue;
-
-    const { data: linkedProducts } = await supabase
-      .from("product_disease_links")
-      .select("product:offerings!inner(id, name, pcp_registration_number, ontario_class)")
-      .eq("disease_pest_id", diseaseMatch.id)
-      .limit(3);
-
-    if (linkedProducts && linkedProducts.length > 0) {
-      // Only include Ontario-registered products
-      const ontarioProducts = linkedProducts.filter((lp) => {
-        const product = lp.product as unknown as { ontario_class: string | null };
-        return product?.ontario_class;
-      });
-
-      if (ontarioProducts.length > 0) {
-        const productInfo = ontarioProducts
-          .map((lp) => {
-            const product = lp.product as unknown as {
-              name: string;
-              pcp_registration_number: string | null;
-            };
-            return `${product.name}${product.pcp_registration_number ? ` (PCP# ${product.pcp_registration_number})` : ""}`;
-          })
-          .join(", ");
-
-        nudges.push({
-          rep_id: callLog.rep_id,
-          company_id: callLog.company_id,
-          contact_id: callLog.contact_id,
-          call_log_id: callLog.id,
-          nudge_type: "cross_sell",
-          priority: "medium",
-          title: `Treatment options for ${diseaseName}`,
-          message: `${diseaseName} was mentioned. Consider recommending: ${productInfo}`,
-          suggested_action: `Discuss treatment options for ${diseaseName} on next contact.`,
-          due_date: null,
-        });
-      }
-    }
-  }
-
-  // 4. Competitor mentioned → related_info
-  for (const competitor of extraction.competitor_mentions) {
-    if (!canAddNudge("related_info")) break;
-    nudges.push({
-      rep_id: callLog.rep_id,
-      company_id: callLog.company_id,
-      contact_id: callLog.contact_id,
-      call_log_id: callLog.id,
-      nudge_type: "related_info",
-      priority: "medium",
-      title: `Competitor mentioned: ${competitor}`,
-      message: `"${competitor}" was mentioned during the call. Review competitive positioning.`,
-      suggested_action: null,
-      due_date: null,
-    });
-  }
-
-  // 5. Disease mentioned + knowledge_base has tips → related_info
-  for (const diseaseName of extraction.diseases_mentioned) {
-    if (!canAddNudge("related_info")) break;
-    const { data: kbEntries } = await supabase
-      .from("turf_knowledge_base")
-      .select("title")
-      .or(`title.ilike.%${diseaseName.replace(/[%_]/g, "")}%,keywords.cs.{${diseaseName.replace(/[%_]/g, "").toLowerCase()}}`)
-      .limit(1);
-
-    if (kbEntries && kbEntries.length > 0) {
-      nudges.push({
-        rep_id: callLog.rep_id,
-        company_id: callLog.company_id,
-        contact_id: callLog.contact_id,
-        call_log_id: callLog.id,
-        nudge_type: "related_info",
-        priority: "low",
-        title: `Knowledge base: ${diseaseName}`,
-        message: `Reference material available: "${kbEntries[0].title}". Share with superintendent for added value.`,
-        suggested_action: null,
-        due_date: null,
-      });
-    }
-  }
-
-  // 6. Product seasonal availability mismatch → inventory_alert
-  const currentMonth = new Date().toLocaleString("en-US", { month: "long" }).toLowerCase();
-  const currentSeason = getSeason(new Date().getMonth());
-
-  for (const pr of extraction.products_requested) {
-    if (!canAddNudge("inventory_alert")) break;
-    const matched = matchedProducts.get(pr.product_name);
-    if (!matched) continue;
-
-    const { data: offering } = await supabase
-      .from("offerings")
-      .select("name, seasonal_availability, pcp_registration_number")
-      .eq("id", matched.id)
-      .single();
-
-    if (
-      offering?.seasonal_availability &&
-      Array.isArray(offering.seasonal_availability) &&
-      offering.seasonal_availability.length > 0
-    ) {
-      const availableLower = offering.seasonal_availability.map((s: string) => s.toLowerCase());
-      if (
-        !availableLower.includes(currentSeason) &&
-        !availableLower.includes(currentMonth)
-      ) {
-        nudges.push({
-          rep_id: callLog.rep_id,
-          company_id: callLog.company_id,
-          contact_id: callLog.contact_id,
-          call_log_id: callLog.id,
-          nudge_type: "inventory_alert",
-          priority: "medium",
-          title: `Seasonal availability: ${offering.name}`,
-          message: `${offering.name}${offering.pcp_registration_number ? ` (PCP# ${offering.pcp_registration_number})` : ""} may not be available in ${currentSeason}. Available: ${offering.seasonal_availability.join(", ")}.`,
-          suggested_action: "Check inventory and confirm availability with warehouse.",
-          due_date: null,
-        });
-      }
-    }
-  }
-
-  // 7. Promo check — if a mentioned/requested product has an active promotion
+  // 3. Promo check — if a mentioned/requested product has an active promotion
   const today = new Date().toISOString().split("T")[0];
   const allMentionedProductIds = new Set<string>();
   for (const pr of extraction.products_requested) {
@@ -680,7 +561,7 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
     }
   }
 
-  // 8. Cross-rep disease intelligence — if 2+ other reps reported same disease in 72hrs
+  // 4. Cross-rep disease intelligence — if 2+ other reps reported same disease in 72hrs
   for (const diseaseName of extraction.diseases_mentioned) {
     if (!canAddNudge("disease_alert")) break;
     const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
@@ -724,64 +605,7 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
     }
   }
 
-  // 9. Related product suggestion — disease discussed but top product not mentioned
-  for (const diseaseName of extraction.diseases_mentioned) {
-    if (!canAddNudge("cross_sell")) break;
-    const diseaseMatch = matchedDiseases.get(diseaseName);
-    if (!diseaseMatch) continue;
-
-    const { data: topProducts } = await supabase
-      .from("product_disease_links")
-      .select("product:offerings!inner(id, name, pcp_registration_number, ontario_class)")
-      .eq("disease_pest_id", diseaseMatch.id)
-      .eq("offerings.is_active", true)
-      .not("offerings.ontario_class", "is", null)
-      .limit(1);
-
-    if (topProducts && topProducts.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const topProduct = (topProducts[0] as any).product as {
-        id: string;
-        name: string;
-        pcp_registration_number: string | null;
-      };
-
-      // Only suggest if the product wasn't already mentioned
-      const alreadyMentioned = extraction.products_mentioned.some(
-        (p) => p.toLowerCase() === topProduct.name.toLowerCase()
-      );
-      if (!alreadyMentioned && callLog.company_id) {
-        // Check if this course has purchased this product this season
-        const yearStart = `${new Date().getFullYear()}-01-01`;
-        const { data: purchases } = await supabase
-          .from("deal_items")
-          .select("id, deal:deals!inner(company_id, stage)")
-          .eq("deals.company_id", callLog.company_id)
-          .eq("offering_id", topProduct.id)
-          .in("deals.stage", ["Paid", "Order Placed"])
-          .gt("created_at", yearStart)
-          .limit(1);
-
-        if (!purchases || purchases.length === 0) {
-          const courseLabel = extraction.company_names[0] || "this course";
-          nudges.push({
-            rep_id: callLog.rep_id,
-            company_id: callLog.company_id,
-            contact_id: callLog.contact_id,
-            call_log_id: callLog.id,
-            nudge_type: "cross_sell",
-            priority: "medium",
-            title: `Consider ${topProduct.name} for ${diseaseName}`,
-            message: `${topProduct.name}${topProduct.pcp_registration_number ? ` (PCP# ${topProduct.pcp_registration_number})` : ""} is rated for ${diseaseName} and ${courseLabel} hasn't purchased it this season.`,
-            suggested_action: `Discuss ${topProduct.name} as a treatment option for ${diseaseName}.`,
-            due_date: null,
-          });
-        }
-      }
-    }
-  }
-
-  // 10. Reorders → inventory_alert
+  // 5. Reorders → inventory_alert
   for (const reorder of extraction.reorders) {
     if (!canAddNudge("inventory_alert")) break;
     const matched = matchedProducts.get(reorder.product_name);
@@ -799,7 +623,7 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
     });
   }
 
-  // 11. Commitments with deadlines → action_reminder
+  // 6. Commitments with deadlines → action_reminder
   for (const commitment of extraction.commitments) {
     if (!canAddNudge("action_reminder")) break;
     if (commitment.owner === "customer") continue;
@@ -821,22 +645,6 @@ async function generateNudges(ctx: NudgeContext): Promise<number> {
       message: commitment.description + contextSuffix + (commitment.deadline ? ` (Due: ${commitment.deadline})` : ""),
       suggested_action: commitment.description,
       due_date: commitment.deadline || null,
-    });
-  }
-
-  // 12. Urgent dictations → elevated priority nudge
-  if (extraction.urgency_level === "emergency" && canAddNudge("action_reminder")) {
-    nudges.push({
-      rep_id: callLog.rep_id,
-      company_id: callLog.company_id,
-      contact_id: callLog.contact_id,
-      call_log_id: callLog.id,
-      nudge_type: "action_reminder",
-      priority: "urgent",
-      title: "Emergency flagged in call",
-      message: `This call was flagged as emergency-level urgency. ${extraction.summary.slice(0, 200)}`,
-      suggested_action: "Review and act immediately.",
-      due_date: new Date().toISOString().split("T")[0],
     });
   }
 
@@ -969,6 +777,90 @@ async function generateDemandSignals(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Step 3b: Calendar event generation from AI extraction
+// ---------------------------------------------------------------------------
+
+async function generateCalendarEvents(params: {
+  callLogId: string;
+  repId: string;
+  companyId: string | null;
+  contactId: string | null;
+  extraction: LLMExtraction;
+  supabase: ReturnType<typeof createServiceClient>;
+}): Promise<void> {
+  const { callLogId, repId, companyId, contactId, extraction, supabase } = params;
+
+  // Look up rep name for the team_member field
+  const { data: repProfile } = await supabase
+    .from("user_profiles")
+    .select("full_name, email")
+    .eq("id", repId)
+    .single();
+  const teamMember = repProfile?.full_name || repProfile?.email || "";
+
+  // Look up company name for event titles
+  let companyName = extraction.company_names[0] || null;
+  if (!companyName && companyId) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("id", companyId)
+      .single();
+    companyName = company?.name || null;
+  }
+
+  const contactName = extraction.contact_names[0] || null;
+
+  const events: Array<Record<string, unknown>> = [];
+
+  // a. Follow-up date → follow_up calendar event
+  if (extraction.follow_up_needed && extraction.follow_up_date) {
+    const summaryFirstSentence = extraction.summary.split(/[.!?]/)[0] || extraction.summary;
+    events.push({
+      title: `Follow up: ${companyName || "Customer"}`,
+      description: `Re: ${summaryFirstSentence}`,
+      event_type: "follow_up",
+      start_date: extraction.follow_up_date,
+      end_date: extraction.follow_up_date,
+      team_member: teamMember,
+      company_id: companyId,
+      contact_id: contactId,
+      source: "ai_extracted",
+      source_call_log_id: callLogId,
+    });
+  }
+
+  // b. Commitments with deadlines → commitment calendar events
+  for (const commitment of extraction.commitments) {
+    if (!commitment.deadline) continue;
+    if (commitment.owner === "customer") continue;
+
+    const description = contactName && companyName
+      ? `Committed during call with ${contactName} at ${companyName}`
+      : companyName
+        ? `Committed during call with ${companyName}`
+        : "Committed during call";
+
+    events.push({
+      title: commitment.description.slice(0, 100),
+      description,
+      event_type: "commitment",
+      start_date: commitment.deadline,
+      end_date: commitment.deadline,
+      team_member: teamMember,
+      company_id: companyId,
+      contact_id: contactId,
+      source: "ai_extracted",
+      source_call_log_id: callLogId,
+    });
+  }
+
+  if (events.length > 0) {
+    await supabase.from("calendar_events").insert(events);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -985,12 +877,6 @@ function determinePriority(extraction: LLMExtraction): NudgePriority {
   return "medium";
 }
 
-function getSeason(month: number): string {
-  if (month >= 2 && month <= 4) return "spring";
-  if (month >= 5 && month <= 7) return "summer";
-  if (month >= 8 && month <= 10) return "fall";
-  return "winter";
-}
 
 const VALID_SENTIMENTS: Sentiment[] = ["positive", "neutral", "concerned", "urgent"];
 
