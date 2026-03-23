@@ -27,7 +27,7 @@ export const GET = withApiProtection(async (request: Request) => {
          products_requested, confidence_score, created_at,
          call_log:call_logs!inner(
            id, raw_transcript, rep_id, company_id, contact_id, created_at,
-           rep:user_profiles!call_logs_rep_id_fkey(id, full_name, territory),
+           rep:user_profiles(id, full_name, territory),
            company:companies(id, name),
            contact:contacts(id, first_name, last_name)
          )`,

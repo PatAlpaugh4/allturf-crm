@@ -319,7 +319,7 @@ async function gatherDayActivity(
     .from("call_logs")
     .select(
       `id, rep_id, company_id, created_at,
-       rep:user_profiles!call_logs_rep_id_fkey(full_name, territory),
+       rep:user_profiles(full_name, territory),
        company:companies(name),
        extraction:call_log_extractions(
          summary, sentiment, diseases_mentioned, products_mentioned,
