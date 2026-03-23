@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
-export const GET = withApiProtection(async (request: Request) => {
+export async function GET(request: Request) {
   try {
     const supabase = createServiceClient();
 
@@ -205,4 +204,4 @@ export const GET = withApiProtection(async (request: Request) => {
       { status: 500 },
     );
   }
-});
+}

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 import { generateDailyDigest } from "@/lib/digest-generator";
 
 // Future: trigger via cron job each morning at 7:00 AM ET.
 // For now, on-demand via the digest UI or direct API call.
 
-export const POST = withApiProtection(async (request: Request) => {
+export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
 
@@ -37,10 +36,10 @@ export const POST = withApiProtection(async (request: Request) => {
       { status: 500 }
     );
   }
-});
+}
 
 // GET: Retrieve an existing digest by date
-export const GET = withApiProtection(async (request: Request) => {
+export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const dateStr = searchParams.get("date");
@@ -71,4 +70,4 @@ export const GET = withApiProtection(async (request: Request) => {
       { status: 500 }
     );
   }
-});
+}
