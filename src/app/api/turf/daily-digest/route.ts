@@ -27,7 +27,12 @@ export const POST = withApiProtection(async (request: Request) => {
 
     const result = await generateDailyDigest(targetDate);
 
-    return NextResponse.json(result, {
+    const response: Record<string, unknown> = { ...result };
+    if (result.no_activity && result.diagnostics) {
+      response.hint = `Found ${result.diagnostics.total} call log(s) but none with status 'completed'. Statuses: ${JSON.stringify(result.diagnostics.statuses)}`;
+    }
+
+    return NextResponse.json(response, {
       status: result.success ? 200 : 500,
     });
   } catch {

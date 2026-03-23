@@ -19,10 +19,16 @@ import type {
 // Public types
 // ---------------------------------------------------------------------------
 
+export interface DigestDiagnostics {
+  total: number;
+  statuses: Record<string, number>;
+}
+
 export interface DigestResult {
   success: boolean;
   digest_id?: string;
   no_activity?: boolean;
+  diagnostics?: DigestDiagnostics;
   error?: string;
 }
 
@@ -89,6 +95,7 @@ export interface DigestStructuredData {
   disease_watch: DiseaseWatch[];
   action_items_rollup: ActionItemRollup[];
   sentiment_totals: { positive: number; neutral: number; concerned: number; urgent: number };
+  diagnostics?: DigestDiagnostics;
 }
 
 interface DayActivity {
@@ -130,6 +137,7 @@ interface DayActivity {
     rep_id: string;
   }>;
   topCourses: Array<{ company_id: string; company_name: string; call_count: number }>;
+  diagnostics?: DigestDiagnostics;
 }
 
 interface TrendContext {
@@ -167,8 +175,12 @@ export async function generateDailyDigest(date: Date): Promise<DigestResult> {
 
   // No activity — store a minimal digest
   if (activity.totalCalls === 0) {
+    const noActivitySummary = activity.diagnostics
+      ? `${activity.diagnostics.total} call log(s) were recorded but none have finished processing. Statuses: ${Object.entries(activity.diagnostics.statuses).map(([s, c]) => `${s}: ${c}`).join(", ")}.`
+      : "No field activity was recorded for this date.";
+
     const structuredData: DigestStructuredData = {
-      executive_summary: "No field activity was recorded for this date.",
+      executive_summary: noActivitySummary,
       rep_activity: [],
       inactive_reps: activity.inactiveReps.map((r) => ({
         name: r.full_name || "Unknown",
@@ -178,6 +190,7 @@ export async function generateDailyDigest(date: Date): Promise<DigestResult> {
       disease_watch: [],
       action_items_rollup: [],
       sentiment_totals: { positive: 0, neutral: 0, concerned: 0, urgent: 0 },
+      diagnostics: activity.diagnostics,
     };
 
     const { data: digest } = await supabase
@@ -196,7 +209,12 @@ export async function generateDailyDigest(date: Date): Promise<DigestResult> {
       .select("id")
       .single();
 
-    return { success: true, digest_id: digest?.id, no_activity: true };
+    return {
+      success: true,
+      digest_id: digest?.id,
+      no_activity: true,
+      diagnostics: activity.diagnostics,
+    };
   }
 
   // Run trend detection for trailing 7-day window
@@ -292,12 +310,12 @@ async function gatherDayActivity(
   supabase: ReturnType<typeof createServiceClient>
 ): Promise<DayActivity> {
   const dayStart = new Date(date);
-  dayStart.setHours(0, 0, 0, 0);
+  dayStart.setUTCHours(0, 0, 0, 0);
   const dayEnd = new Date(date);
-  dayEnd.setHours(23, 59, 59, 999);
+  dayEnd.setUTCHours(23, 59, 59, 999);
 
   // Fetch call logs with extractions + commitments/reorders
-  const { data: callLogs } = await supabase
+  const { data: callLogs, error: callLogsError } = await supabase
     .from("call_logs")
     .select(
       `id, rep_id, company_id, created_at,
@@ -313,11 +331,39 @@ async function gatherDayActivity(
     .lte("created_at", dayEnd.toISOString())
     .eq("processing_status", "completed");
 
+  if (callLogsError) {
+    console.error("[digest] call_logs query failed:", callLogsError.message);
+  }
+
+  // Diagnostic: when no completed logs found, check if logs exist in other statuses
+  let diagnostics: DigestDiagnostics | undefined;
+  if (!callLogs || callLogs.length === 0) {
+    const { data: statusCheck } = await supabase
+      .from("call_logs")
+      .select("processing_status")
+      .gte("created_at", dayStart.toISOString())
+      .lte("created_at", dayEnd.toISOString());
+
+    if (statusCheck && statusCheck.length > 0) {
+      const counts = statusCheck.reduce((acc, r) => {
+        const status = r.processing_status || "unknown";
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      console.error("[digest] Found call logs but none completed:", JSON.stringify(counts));
+      diagnostics = { total: statusCheck.length, statuses: counts };
+    }
+  }
+
   // Fetch all reps
-  const { data: allReps } = await supabase
+  const { data: allReps, error: allRepsError } = await supabase
     .from("user_profiles")
     .select("id, full_name, territory")
     .eq("is_active", true);
+
+  if (allRepsError) {
+    console.error("[digest] user_profiles query failed:", allRepsError.message);
+  }
 
   const callsByRep = new Map<string, DayActivity["callsByRep"] extends Map<string, infer V> ? V : never>();
   const diseasesMentioned = new Map<string, { count: number; repIds: Set<string>; territories: Set<string> }>();
@@ -474,7 +520,7 @@ async function gatherDayActivity(
     .slice(0, 8);
 
   // Overdue action items from previous days
-  const { data: overdueExtractions } = await supabase
+  const { data: overdueExtractions, error: overdueError } = await supabase
     .from("call_log_extractions")
     .select(
       `action_items,
@@ -482,6 +528,10 @@ async function gatherDayActivity(
     )
     .lt("created_at", dayStart.toISOString())
     .not("action_items", "is", null);
+
+  if (overdueError) {
+    console.error("[digest] overdueExtractions query failed:", overdueError.message);
+  }
 
   const overdueItems: DayActivity["overdueItems"] = [];
   const today = formatDate(date);
@@ -523,6 +573,7 @@ async function gatherDayActivity(
     reorderRequests,
     overdueItems: overdueItems.slice(0, 30),
     topCourses,
+    diagnostics,
   };
 }
 

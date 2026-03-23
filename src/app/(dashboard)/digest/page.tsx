@@ -253,8 +253,22 @@ export default function DigestPage() {
           {/* No activity */}
           {digest.total_calls_logged === 0 && (
             <Card>
-              <CardContent className="py-8 text-center">
-                <p className="text-muted-foreground">No field activity recorded for this date.</p>
+              <CardContent className="py-8 text-center space-y-2">
+                {structured?.diagnostics && structured.diagnostics.total > 0 ? (
+                  <>
+                    <p className="text-amber-600 dark:text-amber-400 font-medium">
+                      {structured.diagnostics.total} call log{structured.diagnostics.total !== 1 ? "s were" : " was"} recorded but {structured.diagnostics.total !== 1 ? "haven't" : "hasn't"} finished processing.
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Statuses: {Object.entries(structured.diagnostics.statuses).map(([s, c]) => `${s}: ${c}`).join(", ")}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Visit the Calls page to check their status, then regenerate the digest.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">No field activity recorded for this date.</p>
+                )}
               </CardContent>
             </Card>
           )}
