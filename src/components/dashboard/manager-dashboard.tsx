@@ -2,19 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
-import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle, Bell, Phone, TrendingUp } from "lucide-react";
 
 import { FieldTrendsCard } from "@/components/dashboard/field-trends";
 import { DailyDigestCard } from "@/components/dashboard/daily-digest-card";
 import { RepActivitySnapshot } from "@/components/dashboard/rep-activity-snapshot";
 import { DemandSignalsCard } from "@/components/dashboard/demand-signals-card";
+import { WeatherWidget } from "@/components/dashboard/weather-widget";
 
 export function ManagerDashboard() {
   return (
     <div className="space-y-4">
-      {/* a. Executive Quick Stats */}
-      <QuickStats />
+      {/* a. Weather + Quick Stats side by side on desktop */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <WeatherWidget />
+        <QuickStats />
+      </div>
 
       {/* b. Latest Field Alerts */}
       <FieldTrendsCard />
@@ -111,7 +114,7 @@ function QuickStats() {
   if (!loaded) return null;
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3">
       <QuickStatCard
         icon={<Phone className="h-4 w-4" />}
         value={stats.callsToday}
@@ -153,38 +156,47 @@ function QuickStatCard({
   sublabel?: string;
   variant?: "default" | "warning" | "danger";
 }) {
-  const borderClass =
+  const gradientClass =
     variant === "danger"
-      ? "border-red-200 dark:border-red-800"
+      ? "bg-gradient-to-br from-red-50 to-card dark:from-red-950/30 dark:to-card"
       : variant === "warning"
-        ? "border-amber-200 dark:border-amber-800"
-        : "";
+        ? "bg-gradient-to-br from-amber-50 to-card dark:from-amber-950/30 dark:to-card"
+        : "bg-card";
+
+  const iconBgClass =
+    variant === "danger"
+      ? "bg-red-100 dark:bg-red-900/30 text-red-500"
+      : variant === "warning"
+        ? "bg-amber-100 dark:bg-amber-900/30 text-amber-500"
+        : "bg-primary/10 text-primary";
 
   const valueClass =
     variant === "danger"
-      ? "text-red-600"
+      ? "text-red-600 dark:text-red-400"
       : variant === "warning"
-        ? "text-amber-600"
+        ? "text-amber-600 dark:text-amber-400"
         : "";
 
   return (
-    <Card className={borderClass}>
-      <CardContent className="p-3 flex items-center gap-3">
-        <div className={`shrink-0 ${
-          variant === "danger" ? "text-red-500" :
-          variant === "warning" ? "text-amber-500" :
-          "text-primary"
-        }`}>
+    <div
+      className={`rounded-2xl border border-border/30 ${gradientClass} shadow-[var(--shadow-card)] transition-shadow duration-200 p-3`}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center ${iconBgClass}`}
+        >
           {icon}
         </div>
         <div>
-          <p className={`text-xl font-bold leading-none ${valueClass}`}>{value}</p>
+          <p className={`text-2xl font-bold leading-none ${valueClass}`}>
+            {value}
+          </p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
           {sublabel && (
             <p className="text-[9px] text-muted-foreground">{sublabel}</p>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

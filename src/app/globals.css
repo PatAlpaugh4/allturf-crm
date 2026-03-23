@@ -25,6 +25,9 @@
     --input: 240 6% 90%;
     --ring: 142 45% 35%;
     --radius: 0.875rem;
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+    --shadow-card-hover: 0 2px 6px rgba(0,0,0,0.06), 0 8px 20px rgba(0,0,0,0.06);
+    --shadow-elevated: 0 4px 12px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.08);
     --chart-1: 142 45% 35%;            /* Green */
     --chart-2: 38 70% 50%;             /* Amber — seasonal */
     --chart-3: 200 50% 45%;            /* Sky blue — weather */
@@ -53,6 +56,9 @@
     --input: 150 8% 16%;
     --ring: 142 50% 45%;
     --radius: 0.875rem;
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.08);
+    --shadow-card-hover: 0 2px 6px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.12);
+    --shadow-elevated: 0 4px 12px rgba(0,0,0,0.12), 0 12px 32px rgba(0,0,0,0.16);
     --chart-1: 142 50% 45%;
     --chart-2: 38 65% 52%;
     --chart-3: 200 45% 50%;
@@ -87,15 +93,17 @@
   }
 
   .glass {
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid hsl(240 6% 90%);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
   }
 
   .dark .glass {
-    background: rgba(18, 20, 25, 0.85);
-    border: 1px solid hsl(150 8% 16%);
+    background: rgba(18, 20, 25, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
   }
 }
 
@@ -129,12 +137,12 @@
 
 /* Stagger children */
 @keyframes cardFadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .stagger-enter > * {
-  animation: cardFadeUp 0.35s ease-out both;
+  animation: cardFadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .stagger-enter > *:nth-child(1) { animation-delay: 0s; }
 .stagger-enter > *:nth-child(2) { animation-delay: 0.04s; }
