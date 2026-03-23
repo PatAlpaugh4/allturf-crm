@@ -21,7 +21,7 @@ export function TeamActivityCard() {
   const [loading, setLoading] = useState(true);
   const supabase = createBrowserClient();
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "manager";
+  const isAdmin = profile?.role === "admin";
 
   useEffect(() => {
     if (!isAdmin) {
@@ -34,7 +34,7 @@ export function TeamActivityCard() {
       const { data: profiles } = await supabase
         .from("user_profiles")
         .select("id, full_name, email, territory, role")
-        .in("role", ["rep", "admin", "manager"]);
+        .in("role", ["member", "admin"]);
 
       if (!profiles) {
         setLoading(false);

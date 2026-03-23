@@ -14,13 +14,21 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   MapPin,
   Search,
   Loader2,
   Plus,
 } from "lucide-react";
-import { CONDITION_COLORS, type ConditionRating } from "@/lib/types";
 
 interface CourseRow {
   id: string;
@@ -31,8 +39,7 @@ interface CourseRow {
   green_grass: string | null;
   fairway_grass: string | null;
   maintenance_level: string | null;
-  last_visit_date: string | null;
-  last_visit_condition: string | null;
+  last_call_date: string | null;
   active_quote_name: string | null;
   active_quote_value: number | null;
   assigned_rep: string | null;
@@ -42,6 +49,7 @@ export default function CoursesPage() {
   const [courses, setCourses] = useState<CourseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
   const router = useRouter();
   const supabase = createBrowserClient();
 
@@ -61,15 +69,15 @@ export default function CoursesPage() {
         return;
       }
 
-      // Batch-fetch latest visits and active quotes for all companies
+      // Batch-fetch latest calls and active quotes for all companies
       const companyIds = companies.map((c) => c.id);
 
-      const [visitsRes, dealsRes, repsRes] = await Promise.all([
+      const [callsRes, dealsRes, repsRes] = await Promise.all([
         supabase
-          .from("visit_reports")
-          .select("company_id, visit_date, overall_condition")
+          .from("call_logs")
+          .select("company_id, created_at")
           .in("company_id", companyIds)
-          .order("visit_date", { ascending: false }),
+          .order("created_at", { ascending: false }),
         supabase
           .from("deals")
           .select("company_id, name, value_cad, stage, assigned_rep_id")
@@ -78,15 +86,12 @@ export default function CoursesPage() {
         supabase.from("user_profiles").select("id, full_name"),
       ]);
 
-      // Index latest visit per company
-      const visitMap = new Map<string, { visit_date: string; overall_condition: string | null }>();
-      if (visitsRes.data) {
-        for (const v of visitsRes.data) {
-          if (v.company_id && !visitMap.has(v.company_id)) {
-            visitMap.set(v.company_id, {
-              visit_date: v.visit_date,
-              overall_condition: v.overall_condition,
-            });
+      // Index latest call per company
+      const callMap = new Map<string, string>();
+      if (callsRes.data) {
+        for (const cl of callsRes.data) {
+          if (cl.company_id && !callMap.has(cl.company_id)) {
+            callMap.set(cl.company_id, cl.created_at);
           }
         }
       }
@@ -114,13 +119,13 @@ export default function CoursesPage() {
       }
 
       const rows: CourseRow[] = companies.map((c) => {
-        const profile = (c.golf_course_profiles as unknown as Array<{
+        const courseProfile = (c.golf_course_profiles as unknown as Array<{
           num_holes: number | null;
           green_grass: string | null;
           fairway_grass: string | null;
           maintenance_level: string | null;
         }>)?.[0];
-        const visit = visitMap.get(c.id);
+        const lastCall = callMap.get(c.id);
         const deal = dealMap.get(c.id);
 
         return {
@@ -128,12 +133,11 @@ export default function CoursesPage() {
           name: c.name,
           city: c.city,
           province: c.province,
-          num_holes: profile?.num_holes ?? null,
-          green_grass: profile?.green_grass ?? null,
-          fairway_grass: profile?.fairway_grass ?? null,
-          maintenance_level: profile?.maintenance_level ?? null,
-          last_visit_date: visit?.visit_date ?? null,
-          last_visit_condition: visit?.overall_condition ?? null,
+          num_holes: courseProfile?.num_holes ?? null,
+          green_grass: courseProfile?.green_grass ?? null,
+          fairway_grass: courseProfile?.fairway_grass ?? null,
+          maintenance_level: courseProfile?.maintenance_level ?? null,
+          last_call_date: lastCall ? lastCall.split("T")[0] : null,
           active_quote_name: deal?.name ?? null,
           active_quote_value: deal?.value_cad ?? null,
           assigned_rep: deal?.assigned_rep_id ? repMap.get(deal.assigned_rep_id) ?? null : null,
@@ -168,7 +172,7 @@ export default function CoursesPage() {
             {filtered.length} course{filtered.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button size="sm" className="gap-2" onClick={() => router.push("/contacts?action=new")}>
+        <Button size="sm" className="gap-2" onClick={() => setAddOpen(true)}>
           <Plus className="h-4 w-4" />
           Add Course
         </Button>
@@ -197,7 +201,7 @@ export default function CoursesPage() {
                 <TableHead className="hidden sm:table-cell">City</TableHead>
                 <TableHead className="hidden md:table-cell text-center">Holes</TableHead>
                 <TableHead className="hidden lg:table-cell">Grass Type</TableHead>
-                <TableHead className="hidden md:table-cell">Last Visit</TableHead>
+                <TableHead className="hidden md:table-cell">Last Call</TableHead>
                 <TableHead className="hidden lg:table-cell">Active Quote</TableHead>
                 <TableHead className="hidden xl:table-cell">Rep</TableHead>
               </TableRow>
@@ -229,17 +233,8 @@ export default function CoursesPage() {
                     {c.green_grass || c.fairway_grass || "—"}
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
-                    {c.last_visit_date ? (
-                      <div className="space-y-0.5">
-                        <p className="text-sm">{c.last_visit_date}</p>
-                        {c.last_visit_condition && (
-                          <Badge
-                            className={`text-[10px] h-4 ${CONDITION_COLORS[c.last_visit_condition as ConditionRating] || ""}`}
-                          >
-                            {c.last_visit_condition}
-                          </Badge>
-                        )}
-                      </div>
+                    {c.last_call_date ? (
+                      <p className="text-sm">{c.last_call_date}</p>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -272,6 +267,117 @@ export default function CoursesPage() {
           </Table>
         </div>
       )}
+
+      <AddCourseDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onCreated={(id) => {
+          setAddOpen(false);
+          router.push(`/courses/${id}`);
+        }}
+      />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add Course Dialog
+// ---------------------------------------------------------------------------
+
+function AddCourseDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (id: string) => void;
+}) {
+  const supabase = createBrowserClient();
+  const [name, setName] = useState("");
+  const [city, setCity] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setName("");
+      setCity("");
+      setError("");
+    }
+  }, [open]);
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      setError("Course name is required.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+
+    const { data, error: err } = await supabase
+      .from("companies")
+      .insert({
+        name: name.trim(),
+        city: city.trim() || null,
+        province: "ON",
+        industry: "Golf Course",
+      })
+      .select("id")
+      .single();
+
+    if (err) {
+      setError(err.message);
+      setSaving(false);
+      return;
+    }
+
+    // Create a golf_course_profiles row
+    if (data) {
+      await supabase.from("golf_course_profiles").insert({ company_id: data.id });
+    }
+
+    setSaving(false);
+    if (data) onCreated(data.id);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add Course</DialogTitle>
+          <DialogDescription>Create a new golf course entry.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="ac-name">Course Name *</Label>
+            <Input
+              id="ac-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Oakville Golf Club"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ac-city">City</Label>
+            <Input
+              id="ac-city"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="e.g. Oakville"
+            />
+          </div>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -12,6 +12,8 @@ import {
   MapPin,
   Mic,
   Pencil,
+  Presentation,
+  Sun,
   Truck,
   Users,
   CircleAlert,
@@ -33,6 +35,9 @@ const EVENT_ICONS: Record<string, typeof Calendar> = {
   meeting: Users,
   follow_up: Calendar,
   commitment: CircleAlert,
+  networking: Users,
+  vacation: Sun,
+  demo: Presentation,
 };
 
 export function UpcomingEventsCard() {

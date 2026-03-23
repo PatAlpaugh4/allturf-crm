@@ -13,7 +13,7 @@ interface TrendSignal {
   severity: string;
   title: string;
   description: string | null;
-  affected_regions: string[] | null;
+  affected_region: string | null;
   affected_companies: string[] | null;
   created_at: string;
 }
@@ -33,13 +33,10 @@ const SIGNAL_LABELS: Record<string, string> = {
 };
 
 export function FieldTrendsCard() {
-  const { profile } = useAuth();
+  const { isAdmin } = useAuth();
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const supabase = createBrowserClient();
-
-  // Only show for admins/managers
-  const isAdmin = profile?.role === "admin" || profile?.role === "manager";
 
   useEffect(() => {
     if (!isAdmin) {
@@ -110,13 +107,11 @@ export function FieldTrendsCard() {
                     {trend.description}
                   </p>
                 )}
-                {trend.affected_regions && trend.affected_regions.length > 0 && (
+                {trend.affected_region && (
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {trend.affected_regions.map((r) => (
-                      <Badge key={r} variant="secondary" className="text-[9px] h-3.5">
-                        {r}
-                      </Badge>
-                    ))}
+                    <Badge variant="secondary" className="text-[9px] h-3.5">
+                      {trend.affected_region}
+                    </Badge>
                   </div>
                 )}
               </div>
