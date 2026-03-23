@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, isValidUUID } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 export const PATCH = withApiProtection(
@@ -9,6 +9,11 @@ export const PATCH = withApiProtection(
   ) => {
     try {
       const { id } = params;
+
+      if (!isValidUUID(id)) {
+        return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+      }
+
       const body = await request.json();
 
       // Only allow updating specific fields

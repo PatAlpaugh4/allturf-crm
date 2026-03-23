@@ -10,6 +10,7 @@ export const GET = withApiProtection(async (request: Request) => {
   const companyId = searchParams.get("company_id");
   const status = searchParams.get("processing_status");
   const limit = clampInt(searchParams.get("limit"), 50, 1, 200);
+  const offset = clampInt(searchParams.get("offset"), 0, 0, 10000);
 
   let query = supabase
     .from("call_logs")
@@ -22,7 +23,7 @@ export const GET = withApiProtection(async (request: Request) => {
       nudges:rep_nudges(id, nudge_type, priority, title, message, is_dismissed, is_completed)
     `)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit - 1);
 
   if (repId) query = query.eq("rep_id", repId);
   if (companyId) query = query.eq("company_id", companyId);
@@ -36,7 +37,11 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST — create a new call log
 export const POST = withApiProtection(async (request: Request) => {
   const supabase = createServiceClient();
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.rep_id) {
     return NextResponse.json({ error: "rep_id is required" }, { status: 400 });

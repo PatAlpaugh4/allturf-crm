@@ -1,14 +1,26 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, requireAdmin, isValidUUID, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+const ALLOWED_FIELDS = [
+  "name", "category", "description", "price", "unit", "size",
+  "active_ingredients", "pcp_registration_number", "ontario_class",
+  "moa_group", "application_rate_min", "application_rate_max",
+  "application_rate_unit", "re_entry_interval_hours", "is_active",
+  "notes", "manufacturer",
+] as const;
+
 export const GET = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from("offerings")
@@ -26,9 +38,18 @@ export const GET = withApiProtection(async (_request: Request, ctx?: RouteContex
 export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext) => {
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
-  const body = await request.json();
 
-  const { disease_links, ...offeringData } = body;
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { disease_links, ...rest } = body;
+  const offeringData = pickFields(rest, ALLOWED_FIELDS);
 
   if (Object.keys(offeringData).length > 0) {
     const { error } = await supabase.from("offerings").update(offeringData).eq("id", id);
@@ -57,8 +78,15 @@ export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext
 }) as (request: Request, ctx: RouteContext) => Promise<NextResponse>;
 
 export const DELETE = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
+  const auth = await requireAdmin(_request);
+  if (auth.error) return auth.error;
+
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
 
   const { error } = await supabase.from("offerings").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,15 +1,24 @@
 import { NextResponse } from "next/server";
-import { withApiProtection, requireAdmin } from "@/lib/api";
+import { withApiProtection, requireAdmin, isValidUUID, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+const ALLOWED_FIELDS = [
+  "title", "description", "product_id", "discount_type", "discount_value",
+  "min_quantity", "start_date", "end_date", "active",
+] as const;
+
 // GET: Single promotion by ID
 export const GET = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from("promotions")
@@ -29,10 +38,21 @@ export const PUT = withApiProtection(async (request: Request, ctx?: RouteContext
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
 
-  const body = await request.json();
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const updates = pickFields(body, ALLOWED_FIELDS);
+  updates.updated_at = new Date().toISOString();
+
   const { data, error } = await supabase
     .from("promotions")
-    .update({ ...body, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq("id", id)
     .select(`*, product:offerings(id, name, category)`)
     .single();
@@ -48,6 +68,10 @@ export const DELETE = withApiProtection(async (_request: Request, ctx?: RouteCon
 
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
 
   const { error } = await supabase
     .from("promotions")

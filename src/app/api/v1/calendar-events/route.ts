@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
+
+const ALLOWED_FIELDS = [
+  "title", "start_date", "end_date", "start_time", "end_time",
+  "event_type", "team_member", "company_id", "contact_id",
+  "notes", "location", "description",
+] as const;
 
 // GET — list calendar events with optional date range and team_member filter
 export const GET = withApiProtection(async (request: Request) => {
@@ -30,7 +36,11 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST — create a calendar event
 export const POST = withApiProtection(async (request: Request) => {
   const supabase = createServiceClient();
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.title || !body.start_date || !body.event_type || !body.team_member) {
     return NextResponse.json(
@@ -39,9 +49,11 @@ export const POST = withApiProtection(async (request: Request) => {
     );
   }
 
+  const insert = pickFields(body, ALLOWED_FIELDS);
+
   const { data, error } = await supabase
     .from("calendar_events")
-    .insert(body)
+    .insert(insert)
     .select("*, company:companies(id, name), contact:contacts(id, first_name, last_name)")
     .single();
 

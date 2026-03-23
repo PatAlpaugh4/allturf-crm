@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
-import { withApiProtection, sanitizeSearch } from "@/lib/api";
+import { withApiProtection, sanitizeSearch, clampInt, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
+
+const ALLOWED_FIELDS = [
+  "name", "category", "description", "price", "unit", "size",
+  "active_ingredients", "pcp_registration_number", "ontario_class",
+  "moa_group", "application_rate_min", "application_rate_max",
+  "application_rate_unit", "re_entry_interval_hours", "is_active",
+  "notes", "manufacturer",
+] as const;
 
 // GET — list offerings with disease links and all product fields
 export const GET = withApiProtection(async (request: Request) => {
@@ -10,6 +18,8 @@ export const GET = withApiProtection(async (request: Request) => {
   const search = searchParams.get("search");
   const activeOnly = searchParams.get("active");
   const moaGroup = searchParams.get("moa_group");
+  const limit = clampInt(searchParams.get("limit"), 50, 1, 200);
+  const offset = clampInt(searchParams.get("offset"), 0, 0, 10000);
 
   let query = supabase
     .from("offerings")
@@ -17,7 +27,8 @@ export const GET = withApiProtection(async (request: Request) => {
       *,
       product_disease_links(id, efficacy, is_primary, disease_pest:turf_diseases_pests(id, name, type))
     `)
-    .order("name");
+    .order("name")
+    .range(offset, offset + limit - 1);
 
   if (category) query = query.eq("category", category);
   if (activeOnly === "true") query = query.eq("is_active", true);
@@ -35,13 +46,18 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST — create an offering
 export const POST = withApiProtection(async (request: Request) => {
   const supabase = createServiceClient();
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.name || !body.category) {
     return NextResponse.json({ error: "name and category are required" }, { status: 400 });
   }
 
-  const { disease_links, ...offeringData } = body;
+  const { disease_links, ...rest } = body;
+  const offeringData = pickFields(rest, ALLOWED_FIELDS);
 
   if (offeringData.price == null) offeringData.price = 0;
   if (offeringData.is_active == null) offeringData.is_active = true;

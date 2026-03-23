@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { withApiProtection, clampInt } from "@/lib/api";
+import { withApiProtection, clampInt, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
+
+const ALLOWED_FIELDS = [
+  "type", "subject", "notes", "contact_id", "deal_id", "company_id",
+  "assigned_rep_id", "visit_report_id", "date", "duration_minutes",
+  "outcome", "status",
+] as const;
 
 // GET — list activities with visit report link
 export const GET = withApiProtection(async (request: Request) => {
@@ -11,6 +17,7 @@ export const GET = withApiProtection(async (request: Request) => {
   const type = searchParams.get("type");
   const repId = searchParams.get("assigned_rep_id");
   const limit = clampInt(searchParams.get("limit"), 50, 1, 200);
+  const offset = clampInt(searchParams.get("offset"), 0, 0, 10000);
 
   let query = supabase
     .from("activities")
@@ -22,7 +29,7 @@ export const GET = withApiProtection(async (request: Request) => {
       visit_report:visit_reports(id, visit_date, overall_condition, company:companies(id, name))
     `)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit - 1);
 
   if (contactId) query = query.eq("contact_id", contactId);
   if (dealId) query = query.eq("deal_id", dealId);
@@ -37,15 +44,21 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST — create an activity
 export const POST = withApiProtection(async (request: Request) => {
   const supabase = createServiceClient();
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.type) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
 
+  const insert = pickFields(body, ALLOWED_FIELDS);
+
   const { data, error } = await supabase
     .from("activities")
-    .insert(body)
+    .insert(insert)
     .select(`
       *,
       contact:contacts(id, first_name, last_name),

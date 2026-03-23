@@ -63,7 +63,11 @@ export const PUT = withApiProtection(async (request: Request) => {
 
     const supabase = createServiceClient();
 
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try { body = await request.json(); } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+
     const { product_id, quantity_on_hand, quantity_committed, quantity_on_order, reorder_point, notes } = body;
 
     if (!product_id) {

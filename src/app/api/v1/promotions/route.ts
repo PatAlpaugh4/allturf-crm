@@ -50,8 +50,12 @@ export const POST = withApiProtection(async (request: Request) => {
 
     const supabase = createServiceClient();
 
-    const body = await request.json();
-    const { title, description, product_id, discount_type, discount_value, min_quantity, start_date, end_date } = body;
+    let body: Record<string, unknown>;
+    try { body = await request.json(); } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    const { title, description, product_id, discount_type, discount_value, min_quantity, start_date, end_date } = body as Record<string, string | number | null>;
 
     if (!title || !start_date || !end_date) {
       return NextResponse.json(

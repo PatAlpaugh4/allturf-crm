@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, clampInt, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
+
+const ALLOWED_DEAL_FIELDS = [
+  "name", "stage", "value_cad", "season", "company_id", "contact_id",
+  "assigned_rep_id", "notes", "expected_close_date", "source",
+  "probability", "lost_reason",
+] as const;
 
 // GET — list deals with company, contact, items, and deliveries
 export const GET = withApiProtection(async (request: Request) => {
@@ -10,6 +16,8 @@ export const GET = withApiProtection(async (request: Request) => {
   const companyId = searchParams.get("company_id");
   const season = searchParams.get("season");
   const assignedRepId = searchParams.get("assigned_rep_id");
+  const limit = clampInt(searchParams.get("limit"), 50, 1, 200);
+  const offset = clampInt(searchParams.get("offset"), 0, 0, 10000);
 
   let query = supabase
     .from("deals")
@@ -20,7 +28,8 @@ export const GET = withApiProtection(async (request: Request) => {
       deal_items(*, offering:offerings(id, name, category, pcp_registration_number)),
       order_deliveries(id, scheduled_date, actual_date, status)
     `)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (stage) query = query.eq("stage", stage);
   if (companyId) query = query.eq("company_id", companyId);
@@ -35,13 +44,18 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST — create a deal with optional items
 export const POST = withApiProtection(async (request: Request) => {
   const supabase = createServiceClient();
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  const { items, ...dealData } = body;
+  const { items, ...rest } = body;
+  const dealData = pickFields(rest, ALLOWED_DEAL_FIELDS);
 
   // Defaults
   if (!dealData.stage) dealData.stage = "Quote Draft";

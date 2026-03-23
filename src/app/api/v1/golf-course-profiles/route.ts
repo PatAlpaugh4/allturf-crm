@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, pickFields } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
+
+const ALLOWED_FIELDS = [
+  "company_id", "num_holes", "course_type", "green_grass", "fairway_grass",
+  "tee_grass", "rough_grass", "maintenance_level", "ipm_program",
+  "irrigation_system", "soil_type", "annual_rounds", "budget_range", "notes",
+] as const;
 
 // GET — list all golf course profiles (with company join)
 export const GET = withApiProtection(async (request: Request) => {
@@ -25,15 +31,21 @@ export const GET = withApiProtection(async (request: Request) => {
 // POST — create a golf course profile
 export const POST = withApiProtection(async (request: Request) => {
   const supabase = createServiceClient();
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.company_id) {
     return NextResponse.json({ error: "company_id is required" }, { status: 400 });
   }
 
+  const insert = pickFields(body, ALLOWED_FIELDS);
+
   const { data, error } = await supabase
     .from("golf_course_profiles")
-    .insert(body)
+    .insert(insert)
     .select("*, company:companies(id, name, city, province)")
     .single();
 

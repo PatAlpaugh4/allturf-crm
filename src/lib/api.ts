@@ -13,6 +13,14 @@ function getRateLimitKey(request: Request): string {
 }
 
 function checkRateLimit(request: Request): NextResponse | null {
+  // Sweep stale entries to prevent memory leak
+  if (rateLimitMap.size > 10_000) {
+    const now = Date.now();
+    rateLimitMap.forEach((v, k) => {
+      if (now > v.resetAt) rateLimitMap.delete(k);
+    });
+  }
+
   const key = getRateLimitKey(request);
   const now = Date.now();
   const entry = rateLimitMap.get(key);
@@ -28,6 +36,29 @@ function checkRateLimit(request: Request): NextResponse | null {
 
   entry.count++;
   return null;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Validate that a string is a valid UUID v4.
+ */
+export function isValidUUID(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
+/**
+ * Pick only allowed fields from a request body, ignoring any others.
+ */
+export function pickFields<T extends Record<string, unknown>>(
+  body: T,
+  allowed: readonly string[]
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (key in body) result[key] = body[key];
+  }
+  return result;
 }
 
 // Store resolved user per-request to avoid double resolution

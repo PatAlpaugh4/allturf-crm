@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiProtection } from "@/lib/api";
+import { withApiProtection, isValidUUID } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase";
 
 interface RouteContext {
@@ -10,6 +10,10 @@ interface RouteContext {
 export const GET = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from("call_logs")
@@ -32,7 +36,15 @@ export const GET = withApiProtection(async (_request: Request, ctx?: RouteContex
 export const PATCH = withApiProtection(async (request: Request, ctx?: RouteContext) => {
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
-  const body = await request.json();
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   // Only allow updating specific fields
   const allowedFields: Record<string, unknown> = {};
@@ -71,6 +83,10 @@ export const PATCH = withApiProtection(async (request: Request, ctx?: RouteConte
 export const DELETE = withApiProtection(async (_request: Request, ctx?: RouteContext) => {
   const supabase = createServiceClient();
   const { id } = await ctx!.params;
+
+  if (!isValidUUID(id)) {
+    return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
+  }
 
   const { error } = await supabase
     .from("call_logs")
