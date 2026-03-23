@@ -47,19 +47,22 @@ async function resolveUser(request?: Request): Promise<User | null> {
       },
     };
     const supabase = createServerClient(safeCookieStore);
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user }, error: cookieErr } = await supabase.auth.getUser();
+    console.log("[resolveUser] cookie auth:", user?.id || "null", cookieErr?.message || "ok");
     if (user) return user;
-  } catch {
-    // cookies() may throw in some contexts
+  } catch (e) {
+    console.log("[resolveUser] cookie error:", e);
   }
 
   // Fallback: Authorization header
   if (request) {
     const authHeader = request.headers.get("authorization");
     const token = authHeader?.replace("Bearer ", "");
+    console.log("[resolveUser] auth header present:", !!authHeader, "token length:", token?.length || 0);
     if (token) {
       const supabase = createServiceClient();
-      const { data: { user } } = await supabase.auth.getUser(token);
+      const { data: { user }, error: tokenErr } = await supabase.auth.getUser(token);
+      console.log("[resolveUser] token auth:", user?.id || "null", tokenErr?.message || "ok");
       if (user) return user;
     }
   }
@@ -83,15 +86,18 @@ export async function requireAdmin(request?: Request): Promise<
 > {
   const user = await resolveUser(request);
   if (!user) {
+    console.error("[requireAdmin] resolveUser returned null");
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
   const supabase = createServiceClient();
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("user_profiles")
     .select("role")
     .eq("id", user.id)
     .single();
+
+  console.log("[requireAdmin] user.id:", user.id, "profile:", profile, "error:", profileError?.message);
 
   if (profile?.role !== "admin") {
     return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
