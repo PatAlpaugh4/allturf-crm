@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -20,7 +21,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  FileText,
   Loader2,
   Mail,
   Package,
@@ -63,10 +63,10 @@ interface TrendSignal {
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
-  critical: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  warning: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  watch: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  info: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  critical: "bg-rose-100/70 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400 border-0",
+  warning: "bg-amber-100/70 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0",
+  watch: "bg-yellow-100/70 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 border-0",
+  info: "bg-sky-100/70 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400 border-0",
 };
 
 function formatDateStr(dateStr: string): string {
@@ -169,54 +169,84 @@ export default function DigestPage() {
   const structured = digest?.rep_activity_breakdown as DigestStructuredData | null;
 
   return (
-    <div className="page-enter mx-auto max-w-3xl space-y-5 pb-8">
+    <div className="page-enter mx-auto max-w-3xl space-y-8 pb-12 pt-2">
       {/* Header with date picker */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" />
-            Daily Digest
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-xs font-medium uppercase tracking-widest text-primary/70 mb-1">Daily Digest</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
             {formatDateStr(selectedDate)}
-          </p>
+          </h1>
         </div>
 
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" onClick={() => navigateDate(-1)} className="h-9 w-9">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm">
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent border-none outline-none text-sm w-[130px]"
-            />
+          <div className="rounded-full bg-secondary/60 p-1 flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={() => navigateDate(-1)} className="h-8 w-8 rounded-full">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex items-center gap-2 px-2 py-1 text-sm">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="bg-transparent border-none outline-none text-sm w-[130px]"
+              />
+            </div>
+            <Button variant="ghost" size="icon" onClick={() => navigateDate(1)} className="h-8 w-8 rounded-full">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => navigateDate(1)} className="h-9 w-9">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
-      {/* Loading */}
+      {/* Loading — skeleton placeholders */}
       {loading && (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <div className="stagger-enter space-y-8">
+          {/* Stat card skeletons */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Card key={i} className="border-border/30">
+                <CardContent className="p-5 space-y-2">
+                  <div className="skeleton h-8 w-16 mx-auto rounded" style={{ animationDelay: `${i * 100}ms` }} />
+                  <div className="skeleton h-3 w-20 mx-auto rounded" style={{ animationDelay: `${i * 100 + 50}ms` }} />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          {/* Briefing skeleton */}
+          <Card className="border-0 shadow-[var(--shadow-elevated)]">
+            <CardContent className="p-6 space-y-3">
+              <div className="skeleton h-3 w-32 rounded" style={{ animationDelay: "200ms" }} />
+              <div className="skeleton h-4 w-full rounded" style={{ animationDelay: "300ms" }} />
+              <div className="skeleton h-4 w-5/6 rounded" style={{ animationDelay: "400ms" }} />
+              <div className="skeleton h-4 w-4/6 rounded" style={{ animationDelay: "500ms" }} />
+            </CardContent>
+          </Card>
+          {/* Section skeletons */}
+          {[0, 1].map((i) => (
+            <Card key={i} className="border-border/30">
+              <CardContent className="p-6 space-y-3">
+                <div className="skeleton h-3 w-28 rounded" style={{ animationDelay: `${600 + i * 200}ms` }} />
+                <div className="skeleton h-12 w-full rounded" style={{ animationDelay: `${700 + i * 200}ms` }} />
+                <div className="skeleton h-12 w-full rounded" style={{ animationDelay: `${800 + i * 200}ms` }} />
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
       {/* No digest — generate */}
       {!loading && !digest && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
-            <Sparkles className="h-10 w-10 text-muted-foreground" />
+        <Card className="border-0 shadow-[var(--shadow-elevated)]">
+          <CardContent className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="h-16 w-16 rounded-full bg-primary/[0.06] flex items-center justify-center">
+              <Sparkles className="h-8 w-8 text-primary/40" />
+            </div>
             <div className="text-center">
-              <p className="font-medium">No digest for {formatDateStr(selectedDate)}</p>
+              <p className="font-medium">No digest available</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Generate an AI-powered summary of field activity.
+                {formatDateStr(selectedDate)}
               </p>
             </div>
             {isAdmin && (
@@ -229,7 +259,7 @@ export default function DigestPage() {
               </Button>
             )}
             {generateError && (
-              <p className="text-sm text-red-600 dark:text-red-400 mt-2">{generateError}</p>
+              <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">{generateError}</p>
             )}
           </CardContent>
         </Card>
@@ -237,22 +267,22 @@ export default function DigestPage() {
 
       {/* Digest content */}
       {!loading && digest && (
-        <>
+        <div className="stagger-enter space-y-8">
           {/* Stats bar */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatCard value={digest.total_calls_logged} label="Calls Logged" />
             <StatCard
               value={structured?.rep_activity?.length || 0}
               label="Active Reps"
               suffix={`/ ${(structured?.rep_activity?.length || 0) + (structured?.inactive_reps?.length || 0)}`}
             />
-            <StatCard value={digest.total_follow_ups_needed} label="Follow-ups" />
-            <StatCard value={trends.length} label="Active Alerts" />
+            <StatCard value={digest.total_follow_ups_needed} label="Follow-ups" accent={digest.total_follow_ups_needed > 0} />
+            <StatCard value={trends.length} label="Active Alerts" accent={trends.length > 0} />
           </div>
 
           {/* No activity */}
           {digest.total_calls_logged === 0 && (
-            <Card>
+            <Card className="border-border/30">
               <CardContent className="py-8 text-center space-y-2">
                 {structured?.diagnostics && structured.diagnostics.total > 0 ? (
                   <>
@@ -277,15 +307,15 @@ export default function DigestPage() {
             <>
               {/* a. Executive Summary */}
               {structured.executive_summary && (
-                <Card className="border-primary/20 bg-primary/[0.02]">
+                <Card className="relative overflow-hidden border-0 shadow-[var(--shadow-elevated)] bg-gradient-to-br from-primary/[0.04] via-card to-card">
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-primary" />
+                    <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-primary/80">
                       Executive Briefing
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm leading-relaxed whitespace-pre-line">
+                    <p className="text-[15px] leading-[1.7] text-foreground/90 whitespace-pre-line">
                       {structured.executive_summary}
                     </p>
                   </CardContent>
@@ -314,93 +344,95 @@ export default function DigestPage() {
 
           {/* Fallback for old-format digests (key_highlights only) */}
           {digest.total_calls_logged > 0 && !structured?.executive_summary && digest.key_highlights && (
-            <Card>
+            <Card className="relative overflow-hidden border-0 shadow-[var(--shadow-elevated)] bg-gradient-to-br from-primary/[0.04] via-card to-card">
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
+                <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-primary/80">
                   Summary
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm leading-relaxed whitespace-pre-line">{digest.key_highlights}</p>
+                <p className="text-[15px] leading-[1.7] text-foreground/90 whitespace-pre-line">{digest.key_highlights}</p>
               </CardContent>
             </Card>
           )}
 
           {/* Trend Alerts */}
           {trends.length > 0 && (
-            <Card>
+            <Card className="border-border/30">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
+                <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
                   Active Trend Alerts
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {trends.map((signal) => (
-                  <div key={signal.id} className="rounded-xl border p-4 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className={SEVERITY_STYLES[signal.severity] || SEVERITY_STYLES.info}>
-                            {signal.severity}
-                          </Badge>
-                          <span className="text-sm font-medium">{signal.title}</span>
+              <CardContent>
+                <div className="divide-y divide-border/20">
+                  {trends.map((signal) => (
+                    <div key={signal.id} className="py-3.5 first:pt-0 last:pb-0 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge className={SEVERITY_STYLES[signal.severity] || SEVERITY_STYLES.info}>
+                              {signal.severity}
+                            </Badge>
+                            <span className="text-sm font-medium">{signal.title}</span>
+                          </div>
+                          {signal.description && (
+                            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                              {signal.description}
+                            </p>
+                          )}
                         </div>
-                        {signal.description && (
-                          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-                            {signal.description}
-                          </p>
-                        )}
+                        <Button variant="ghost" size="sm" onClick={() => handleAcknowledge(signal.id)} className="shrink-0 text-[11px] h-7 text-muted-foreground/60 hover:text-foreground">
+                          Acknowledge
+                        </Button>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => handleAcknowledge(signal.id)} className="shrink-0 text-xs h-8">
-                        Acknowledge
-                      </Button>
+                      {signal.recommended_actions && signal.recommended_actions.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          <p className="text-xs font-medium text-muted-foreground">Recommended actions:</p>
+                          <ul className="space-y-0.5">
+                            {signal.recommended_actions.map((action, i) => (
+                              <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                                <span className="shrink-0 mt-1 h-1 w-1 rounded-full bg-muted-foreground/50" />
+                                {action.action}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
-                    {signal.recommended_actions && signal.recommended_actions.length > 0 && (
-                      <div className="space-y-1 pt-1">
-                        <p className="text-xs font-medium text-muted-foreground">Recommended actions:</p>
-                        <ul className="space-y-0.5">
-                          {signal.recommended_actions.map((action, i) => (
-                            <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                              <span className="shrink-0 mt-1 h-1 w-1 rounded-full bg-muted-foreground/50" />
-                              {action.action}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}
 
           {/* Footer: Regenerate + Email + timestamp */}
-          <div className="flex flex-col items-center gap-3 pt-2">
+          <div className="flex flex-col items-center gap-3 border-t border-border/15 pt-6">
             <div className="flex gap-2">
               {isAdmin && (
-                <Button variant="outline" onClick={handleGenerate} disabled={generating} className="gap-2 text-sm">
+                <Button variant="ghost" onClick={handleGenerate} disabled={generating} className="gap-2 text-[13px] text-muted-foreground/70 hover:text-foreground">
                   {generating ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" />Regenerating...</>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />Regenerating...</>
                   ) : (
-                    <><Sparkles className="h-4 w-4" />Regenerate</>
+                    <><Sparkles className="h-3.5 w-3.5" />Regenerate</>
                   )}
                 </Button>
               )}
               <Button
-                variant="outline"
-                className="gap-2 text-sm"
+                variant="ghost"
+                className="gap-2 text-[13px] text-muted-foreground/70 hover:text-foreground"
                 title="Email delivery coming soon"
                 onClick={() => {/* Coming soon */}}
                 disabled
               >
-                <Mail className="h-4 w-4" />
+                <Mail className="h-3.5 w-3.5" />
                 Email Digest
               </Button>
             </div>
             {digest.generated_at && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground/40">
                 Generated{" "}
                 {new Date(digest.generated_at).toLocaleString("en-CA", {
                   dateStyle: "medium",
@@ -409,7 +441,7 @@ export default function DigestPage() {
               </p>
             )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -419,15 +451,18 @@ export default function DigestPage() {
 // Stat Card
 // ---------------------------------------------------------------------------
 
-function StatCard({ value, label, suffix }: { value: number; label: string; suffix?: string }) {
+function StatCard({ value, label, suffix, accent }: { value: number; label: string; suffix?: string; accent?: boolean }) {
   return (
-    <Card>
-      <CardContent className="p-4 text-center">
-        <p className="text-2xl font-bold">
+    <Card className={cn(
+      "bg-gradient-to-b from-card to-card/80 border-border/30",
+      accent && value > 0 && "from-primary/[0.04] to-card"
+    )}>
+      <CardContent className="p-5 text-center">
+        <p className="text-3xl font-bold tracking-tight tabular-nums">
           {value}
           {suffix && <span className="text-sm font-normal text-muted-foreground ml-0.5">{suffix}</span>}
         </p>
-        <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground mt-0.5">{label}</p>
       </CardContent>
     </Card>
   );
@@ -448,93 +483,96 @@ function RepActivitySection({
   const displayReps = expanded ? reps : reps.slice(0, 5);
 
   return (
-    <Card>
+    <Card className="border-border/30">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
           <Users className="h-4 w-4 text-primary" />
           Rep Activity
-          <Badge variant="secondary" className="text-[10px] font-normal ml-auto">
+          <span className="ml-auto text-[11px] font-normal normal-case tracking-normal text-muted-foreground/60">
             {reps.length} active
-          </Badge>
+          </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
-        {displayReps.map((rep) => {
-          const sentTotal = rep.sentiment_summary.positive + rep.sentiment_summary.neutral +
-            rep.sentiment_summary.concerned + rep.sentiment_summary.urgent;
-          const hasUrgent = rep.sentiment_summary.urgent > 0 || rep.sentiment_summary.concerned > 0;
+      <CardContent>
+        <div className="divide-y divide-border/30">
+          {displayReps.map((rep) => {
+            const sentTotal = rep.sentiment_summary.positive + rep.sentiment_summary.neutral +
+              rep.sentiment_summary.concerned + rep.sentiment_summary.urgent;
+            const hasUrgent = rep.sentiment_summary.urgent > 0 || rep.sentiment_summary.concerned > 0;
 
-          return (
-            <div key={rep.rep_id} className="rounded-lg border px-3 py-2.5 space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <User className="h-3.5 w-3.5 text-primary" />
+            return (
+              <div key={rep.rep_id} className="py-3.5 first:pt-0 last:pb-0 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 ring-1 ring-primary/10 flex items-center justify-center shrink-0">
+                      <User className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{rep.rep_name}</p>
+                      {rep.territory && (
+                        <p className="text-[10px] text-muted-foreground">{rep.territory}</p>
+                      )}
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{rep.rep_name}</p>
-                    {rep.territory && (
-                      <p className="text-[10px] text-muted-foreground">{rep.territory}</p>
+                  <div className="flex items-center gap-2 shrink-0 text-xs">
+                    <span className="font-semibold tabular-nums">{rep.calls_logged}</span>
+                    <span className="text-muted-foreground">calls</span>
+                    {hasUrgent && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" title="Has urgent/concerned calls" />
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0 text-xs">
-                  <span className="font-semibold">{rep.calls_logged} calls</span>
-                  {hasUrgent && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" title="Has urgent/concerned calls" />
-                  )}
-                </div>
+
+                {/* Accounts */}
+                {rep.accounts_touched.length > 0 && (
+                  <p className="text-xs text-muted-foreground pl-10 truncate">
+                    {rep.accounts_touched.join(", ")}
+                  </p>
+                )}
+
+                {/* Commitments */}
+                {rep.commitments.length > 0 && (
+                  <div className="pl-10 space-y-0.5">
+                    {rep.commitments.slice(0, 3).map((c, i) => (
+                      <p key={i} className="text-xs flex items-start gap-1.5">
+                        <CheckCircle2 className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />
+                        <span className="text-muted-foreground">
+                          {c.description}
+                          {c.deadline && (
+                            <span className="text-amber-600 font-medium"> (due {c.deadline})</span>
+                          )}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Sentiment bar */}
+                {sentTotal > 0 && (
+                  <div className="flex gap-px h-1 rounded-full overflow-hidden ml-10 opacity-60">
+                    {rep.sentiment_summary.positive > 0 && (
+                      <div className="bg-emerald-400" style={{ flex: rep.sentiment_summary.positive }} />
+                    )}
+                    {rep.sentiment_summary.neutral > 0 && (
+                      <div className="bg-gray-300 dark:bg-gray-600" style={{ flex: rep.sentiment_summary.neutral }} />
+                    )}
+                    {rep.sentiment_summary.concerned > 0 && (
+                      <div className="bg-amber-400" style={{ flex: rep.sentiment_summary.concerned }} />
+                    )}
+                    {rep.sentiment_summary.urgent > 0 && (
+                      <div className="bg-rose-400" style={{ flex: rep.sentiment_summary.urgent }} />
+                    )}
+                  </div>
+                )}
               </div>
-
-              {/* Accounts */}
-              {rep.accounts_touched.length > 0 && (
-                <p className="text-xs text-muted-foreground pl-9 truncate">
-                  {rep.accounts_touched.join(", ")}
-                </p>
-              )}
-
-              {/* Commitments */}
-              {rep.commitments.length > 0 && (
-                <div className="pl-9 space-y-0.5">
-                  {rep.commitments.slice(0, 3).map((c, i) => (
-                    <p key={i} className="text-xs flex items-start gap-1.5">
-                      <CheckCircle2 className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />
-                      <span className="text-muted-foreground">
-                        {c.description}
-                        {c.deadline && (
-                          <span className="text-amber-600 font-medium"> (due {c.deadline})</span>
-                        )}
-                      </span>
-                    </p>
-                  ))}
-                </div>
-              )}
-
-              {/* Sentiment bar */}
-              {sentTotal > 0 && (
-                <div className="flex gap-0.5 h-1 rounded-full overflow-hidden ml-9">
-                  {rep.sentiment_summary.positive > 0 && (
-                    <div className="bg-green-400" style={{ flex: rep.sentiment_summary.positive }} />
-                  )}
-                  {rep.sentiment_summary.neutral > 0 && (
-                    <div className="bg-gray-300 dark:bg-gray-600" style={{ flex: rep.sentiment_summary.neutral }} />
-                  )}
-                  {rep.sentiment_summary.concerned > 0 && (
-                    <div className="bg-amber-400" style={{ flex: rep.sentiment_summary.concerned }} />
-                  )}
-                  {rep.sentiment_summary.urgent > 0 && (
-                    <div className="bg-red-400" style={{ flex: rep.sentiment_summary.urgent }} />
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
 
         {reps.length > 5 && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-xs text-primary hover:underline w-full text-center py-1"
+            className="text-[11px] font-medium text-primary hover:text-primary/80 transition-colors w-full text-center py-2 mt-2"
           >
             {expanded ? "Show less" : `Show all ${reps.length} reps`}
           </button>
@@ -542,7 +580,7 @@ function RepActivitySection({
 
         {/* Inactive reps */}
         {inactiveReps.length > 0 && (
-          <div className="rounded-lg border border-dashed px-3 py-2 mt-2">
+          <div className="border-t border-border/30 mt-2 pt-3">
             <p className="text-xs text-muted-foreground">
               <span className="font-medium">{inactiveReps.length} reps</span> did not log activity:{" "}
               {inactiveReps.map((r) => r.name).join(", ")}
@@ -568,9 +606,9 @@ function DemandIntelligenceSection({
   if (products.length === 0 && reorders.length === 0) return null;
 
   return (
-    <Card>
+    <Card className="border-border/30">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
           <TrendingUp className="h-4 w-4 text-primary" />
           Demand Intelligence
         </CardTitle>
@@ -579,39 +617,39 @@ function DemandIntelligenceSection({
         {/* Products in demand */}
         {products.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Products in Demand</p>
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 mb-2">Products in Demand</p>
             <div className="overflow-x-auto -mx-4 px-4">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-xs text-muted-foreground">
-                    <th className="text-left py-1.5 pr-2 font-medium">Product</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Mentions</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Requests</th>
-                    <th className="text-right py-1.5 pl-2 font-medium">Inventory</th>
+                  <tr className="border-b border-border/20">
+                    <th className="text-left py-1.5 pr-2 text-[11px] uppercase tracking-wider text-muted-foreground/60 font-medium">Product</th>
+                    <th className="text-right py-1.5 px-2 text-[11px] uppercase tracking-wider text-muted-foreground/60 font-medium">Mentions</th>
+                    <th className="text-right py-1.5 px-2 text-[11px] uppercase tracking-wider text-muted-foreground/60 font-medium">Requests</th>
+                    <th className="text-right py-1.5 pl-2 text-[11px] uppercase tracking-wider text-muted-foreground/60 font-medium">Inventory</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-border/20">
                   {products.slice(0, 8).map((p) => (
-                    <tr key={p.product_name} className={`border-b last:border-b-0 ${p.is_low_stock ? "bg-red-50 dark:bg-red-950/20" : ""}`}>
+                    <tr key={p.product_name} className={p.is_low_stock ? "bg-amber-50/50 dark:bg-amber-950/10" : ""}>
                       <td className="py-1.5 pr-2">
                         <div className="flex items-center gap-1.5">
                           <span className="truncate max-w-[180px] capitalize">{p.product_name}</span>
                           {p.is_low_stock && (
-                            <Badge className="text-[9px] bg-red-100 text-red-700 shrink-0">LOW</Badge>
+                            <Badge className="text-[9px] bg-amber-100/80 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0 shrink-0">LOW</Badge>
                           )}
                         </div>
                       </td>
-                      <td className="py-1.5 px-2 text-right">{p.mention_count}</td>
-                      <td className="py-1.5 px-2 text-right">
+                      <td className="py-1.5 px-2 text-right tabular-nums">{p.mention_count}</td>
+                      <td className="py-1.5 px-2 text-right tabular-nums">
                         {p.request_count > 0 ? (
                           <span className="font-medium text-primary">{p.request_count}</span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="py-1.5 pl-2 text-right">
+                      <td className="py-1.5 pl-2 text-right tabular-nums">
                         {p.inventory_on_hand != null ? (
-                          <span className={p.is_low_stock ? "text-red-600 font-medium" : ""}>
+                          <span className={p.is_low_stock ? "text-amber-600 font-medium" : ""}>
                             {p.inventory_on_hand}
                           </span>
                         ) : (
@@ -629,21 +667,21 @@ function DemandIntelligenceSection({
         {/* Reorder requests */}
         {reorders.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Reorder Requests</p>
-            <div className="space-y-1.5">
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 mb-2">Reorder Requests</p>
+            <div className="divide-y divide-border/20">
               {reorders.slice(0, 6).map((r, i) => (
-                <div key={i} className="flex items-center justify-between gap-2 text-xs rounded-lg border px-3 py-2">
+                <div key={i} className="flex items-center justify-between gap-2 text-xs py-2.5 first:pt-0 last:pb-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     <span className="font-medium capitalize truncate">{r.product_name}</span>
                     <span className="text-muted-foreground truncate">for {r.customer_name}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 text-muted-foreground">
-                    {r.quantity && <span>{r.quantity} units</span>}
+                    {r.quantity && <span className="tabular-nums">{r.quantity} units</span>}
                     {r.needed_by && (
-                      <Badge variant="outline" className="text-[10px] h-5">
+                      <span className="text-[10px] text-muted-foreground/70">
                         by {r.needed_by}
-                      </Badge>
+                      </span>
                     )}
                     <span className="text-[10px]">via {r.rep_name}</span>
                   </div>
@@ -665,52 +703,54 @@ function DiseaseWatchSection({ diseases }: { diseases: DiseaseWatch[] }) {
   if (diseases.length === 0) return null;
 
   return (
-    <Card>
+    <Card className="border-border/30">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
           <Bug className="h-4 w-4 text-primary" />
           Disease / Pest Watch
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
-        {diseases.slice(0, 8).map((d) => (
-          <div key={d.disease_name} className="rounded-lg border px-3 py-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm font-medium">{d.disease_name}</span>
-                {d.trending === "up" && (
-                  <Badge className="text-[9px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 gap-0.5">
-                    <ArrowUp className="h-2.5 w-2.5" />
-                    Trending
-                  </Badge>
-                )}
-                {d.trending === "new" && (
-                  <Badge className="text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                    New
-                  </Badge>
-                )}
+      <CardContent>
+        <div className="divide-y divide-border/20">
+          {diseases.slice(0, 8).map((d) => (
+            <div key={d.disease_name} className="py-3.5 first:pt-0 last:pb-0">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm font-medium">{d.disease_name}</span>
+                  {d.trending === "up" && (
+                    <Badge className="text-[9px] bg-rose-100/80 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400 border-0 gap-0.5">
+                      <ArrowUp className="h-2.5 w-2.5" />
+                      Trending
+                    </Badge>
+                  )}
+                  {d.trending === "new" && (
+                    <Badge className="text-[9px] bg-sky-100/80 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400 border-0">
+                      New
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 text-[11px] tabular-nums text-muted-foreground/70 shrink-0">
+                  <span>{d.mention_count} mentions</span>
+                  <span>{d.rep_count} reps</span>
+                </div>
               </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                <span>{d.mention_count} mentions</span>
-                <span>{d.rep_count} reps</span>
-              </div>
+              {d.regions.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Regions: {d.regions.join(", ")}
+                </p>
+              )}
+              {d.related_products.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {d.related_products.map((p) => (
+                    <Badge key={p} variant="outline" className="text-[10px] h-5 border-border/30 text-muted-foreground/80">
+                      {p}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
-            {d.regions.length > 0 && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Regions: {d.regions.join(", ")}
-              </p>
-            )}
-            {d.related_products.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1.5">
-                {d.related_products.map((p) => (
-                  <Badge key={p} variant="outline" className="text-[10px] h-5">
-                    {p}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
@@ -728,46 +768,45 @@ function ActionItemsSection({ rollup }: { rollup: ActionItemRollup[] }) {
   const dueTodayCount = allItems.filter((i) => i.status === "due_today").length;
 
   return (
-    <Card>
+    <Card className="border-border/30">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-primary" />
           Action Items
-          <div className="flex gap-1.5 ml-auto">
+          <div className="flex gap-2 ml-auto">
             {overdueCount > 0 && (
-              <Badge className="text-[10px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              <span className="text-[11px] font-normal normal-case tracking-normal text-rose-600 dark:text-rose-400">
                 {overdueCount} overdue
-              </Badge>
+              </span>
             )}
             {dueTodayCount > 0 && (
-              <Badge className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+              <span className="text-[11px] font-normal normal-case tracking-normal text-amber-600 dark:text-amber-400">
                 {dueTodayCount} due today
-              </Badge>
+              </span>
             )}
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         {rollup.slice(0, 8).map((rep) => (
           <div key={rep.rep_id}>
-            <p className="text-xs font-medium text-muted-foreground mb-1.5">{rep.rep_name}</p>
-            <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 mb-2">{rep.rep_name}</p>
+            <div className="divide-y divide-border/20">
               {rep.items.slice(0, 5).map((item, i) => (
                 <div
                   key={i}
-                  className={`flex items-start gap-2 text-xs rounded-lg border px-3 py-2 ${
-                    item.status === "overdue"
-                      ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
-                      : item.status === "due_today"
-                        ? "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20"
-                        : ""
-                  }`}
+                  className={cn(
+                    "flex items-start gap-2 text-xs py-2.5 first:pt-0 last:pb-0",
+                    item.status === "overdue" && "border-l-2 border-l-rose-400/60 pl-3",
+                    item.status === "due_today" && "border-l-2 border-l-amber-400/60 pl-3"
+                  )}
                 >
-                  <Clock className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${
-                    item.status === "overdue" ? "text-red-500" :
+                  <Clock className={cn(
+                    "h-3.5 w-3.5 shrink-0 mt-0.5",
+                    item.status === "overdue" ? "text-rose-500" :
                     item.status === "due_today" ? "text-amber-500" :
                     "text-muted-foreground"
-                  }`} />
+                  )} />
                   <div className="min-w-0 flex-1">
                     <p className="text-muted-foreground">{item.description}</p>
                     <div className="flex items-center gap-2 mt-0.5">
@@ -775,27 +814,28 @@ function ActionItemsSection({ rollup }: { rollup: ActionItemRollup[] }) {
                         <span className="text-[10px] text-muted-foreground">{item.company_name}</span>
                       )}
                       {item.due_date && (
-                        <span className={`text-[10px] font-medium ${
-                          item.status === "overdue" ? "text-red-600" :
+                        <span className={cn(
+                          "text-[10px] font-medium",
+                          item.status === "overdue" ? "text-rose-600" :
                           item.status === "due_today" ? "text-amber-600" :
                           "text-muted-foreground"
-                        }`}>
+                        )}>
                           {item.status === "overdue" ? `Overdue (${item.due_date})` :
                            item.status === "due_today" ? "Due today" :
                            `Due ${item.due_date}`}
                         </span>
                       )}
-                      <Badge variant="outline" className="text-[9px] h-4">{item.type.replace(/_/g, " ")}</Badge>
+                      <Badge variant="outline" className="text-[9px] h-4 border-border/30 text-muted-foreground/80">{item.type.replace(/_/g, " ")}</Badge>
                     </div>
                   </div>
                 </div>
               ))}
-              {rep.items.length > 5 && (
-                <p className="text-[10px] text-muted-foreground text-center">
-                  +{rep.items.length - 5} more items
-                </p>
-              )}
             </div>
+            {rep.items.length > 5 && (
+              <p className="text-[10px] text-muted-foreground text-center mt-1">
+                +{rep.items.length - 5} more items
+              </p>
+            )}
           </div>
         ))}
       </CardContent>
