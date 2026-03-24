@@ -131,7 +131,9 @@ export default function DigestPage() {
 
         if (res.ok) {
           const data = await res.json();
-          if (data.digest) {
+          if (data.error) {
+            setFetchError(data.error);
+          } else if (data.digest) {
             setDigest(data.digest);
           }
         } else {

@@ -58,21 +58,32 @@ export const GET = withApiProtection(async (request: Request) => {
 
     const fallback = searchParams.get("fallback");
     const supabase = createServiceClient();
-    let { data: digest } = await supabase
+    const { data: digest, error: digestError } = await supabase
       .from("daily_digests")
       .select("*")
       .eq("digest_date", dateStr)
       .maybeSingle();
 
+    if (digestError) {
+      console.error("Digest query error:", digestError.message, digestError.code);
+      return NextResponse.json(
+        { error: `Database error: ${digestError.message}`, digest: null },
+        { status: 200 } // still 200 so frontend can show the error message
+      );
+    }
+
     // Only fall back to latest digest when explicitly requested (initial page load)
     if (!digest && fallback === "latest") {
-      const { data: latest } = await supabase
+      const { data: latest, error: fallbackError } = await supabase
         .from("daily_digests")
         .select("*")
         .order("digest_date", { ascending: false })
         .limit(1)
         .maybeSingle();
-      digest = latest;
+      if (fallbackError) {
+        console.error("Digest fallback error:", fallbackError.message);
+      }
+      return NextResponse.json({ digest: latest || null });
     }
 
     return NextResponse.json({ digest: digest || null });
