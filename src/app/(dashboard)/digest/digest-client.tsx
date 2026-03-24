@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -106,80 +106,72 @@ export default function DigestPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [fetchCount, setFetchCount] = useState(0); // bump to re-fetch same date
 
-  // Guard against concurrent fetches — only the latest fetch wins
-  const fetchId = useRef(0);
+  // Single effect: fetch digest whenever selectedDate or fetchCount changes
+  useEffect(() => {
+    let cancelled = false;
 
-  const doFetch = useCallback(async (date: string, withFallback: boolean) => {
-    const id = ++fetchId.current;
-    setLoading(true);
-    setDigest(null);
-    setFetchError(null);
+    async function load() {
+      setLoading(true);
+      setDigest(null);
+      setFetchError(null);
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (id !== fetchId.current) return; // superseded by newer fetch
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
 
-      const authHeaders: Record<string, string> = {};
-      if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
+        const authHeaders: Record<string, string> = {};
+        if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
 
-      const fallbackParam = withFallback ? "&fallback=latest" : "";
-      const res = await fetch(`/api/turf/daily-digest?date=${date}${fallbackParam}`, {
-        headers: authHeaders,
-      });
-      if (id !== fetchId.current) return; // superseded
+        const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}`, {
+          headers: authHeaders,
+        });
+        if (cancelled) return;
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.digest) {
-          setDigest(data.digest);
-          if (data.digest.digest_date && data.digest.digest_date !== date) {
-            setSelectedDate(data.digest.digest_date);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.digest) {
+            setDigest(data.digest);
           }
+        } else {
+          const body = await res.json().catch(() => ({}));
+          setFetchError(body.error || `API error ${res.status}`);
         }
-      } else {
-        const body = await res.json().catch(() => ({}));
-        setFetchError(body.error || `API error ${res.status}`);
-      }
 
-      // Trend signals — non-critical, fire and forget
-      Promise.resolve(
-        supabase
-          .from("field_trend_signals")
-          .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
-          .eq("is_active", true)
-          .order("severity", { ascending: false })
-          .limit(10)
-      )
-        .then(({ data: signalsData }) => {
-          if (id === fetchId.current) {
-            setTrends((signalsData as TrendSignal[]) || []);
-          }
-        })
-        .catch(() => {});
-    } catch (err) {
-      if (id !== fetchId.current) return;
-      setFetchError(err instanceof Error ? err.message : "Failed to load digest");
-    } finally {
-      if (id === fetchId.current) {
-        setLoading(false);
+        // Trend signals — non-critical
+        try {
+          const { data: signalsData } = await supabase
+            .from("field_trend_signals")
+            .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
+            .eq("is_active", true)
+            .order("severity", { ascending: false })
+            .limit(10);
+          if (!cancelled) setTrends((signalsData as TrendSignal[]) || []);
+        } catch {
+          // non-critical
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setFetchError(err instanceof Error ? err.message : "Failed to load digest");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  // Initial fetch only
-  useEffect(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    doFetch(d.toISOString().split("T")[0], true);
-  }, [doFetch]);
+    load();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, fetchCount]);
 
   // User-driven date change
-  const changeDate = useCallback((newDate: string) => {
-    setSelectedDate(newDate);
-    doFetch(newDate, false);
-  }, [doFetch]);
+  const changeDate = (newDate: string) => setSelectedDate(newDate);
+
+  // Force re-fetch (after generate, retry, etc.)
+  const refetch = () => setFetchCount((c) => c + 1);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -196,7 +188,7 @@ export default function DigestPage() {
         body: JSON.stringify({ digest_date: selectedDate }),
       });
       if (res.ok) {
-        doFetch(selectedDate, false);
+        refetch();
       } else {
         const data = await res.json().catch(() => ({}));
         setGenerateError(data.error || `Generation failed (${res.status})`);
@@ -326,7 +318,7 @@ export default function DigestPage() {
               )}
             </div>
             {fetchError && (
-              <Button onClick={() => doFetch(selectedDate, false)} className="min-h-[44px] gap-2">
+              <Button onClick={refetch} className="min-h-[44px] gap-2">
                 Try Again
               </Button>
             )}
