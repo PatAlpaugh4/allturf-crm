@@ -113,56 +113,63 @@ export default function DigestPage() {
     setDigest(null);
     setFetchError(null);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const hardTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Request timed out — please try again")), 15000)
+    );
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const authHeaders: Record<string, string> = {};
-      if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
+      await Promise.race([hardTimeout, (async () => {
+        console.log("[digest] fetching", date, withFallback ? "(with fallback)" : "");
 
-      const fallbackParam = withFallback ? "&fallback=latest" : "";
-      const res = await fetch(
-        `/api/turf/daily-digest?date=${date}${fallbackParam}`,
-        { headers: authHeaders, signal: controller.signal },
-      );
+        console.log("[digest] getting session...");
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log("[digest] session ok, token:", !!session?.access_token);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.digest) {
-          setDigest(data.digest);
-          // Sync date picker to match returned digest (e.g. latest fallback)
-          if (data.digest.digest_date && data.digest.digest_date !== date) {
-            setSelectedDate(data.digest.digest_date);
+        const authHeaders: Record<string, string> = {};
+        if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
+
+        const fallbackParam = withFallback ? "&fallback=latest" : "";
+        const url = `/api/turf/daily-digest?date=${date}${fallbackParam}`;
+        console.log("[digest] fetching API:", url);
+        const res = await fetch(url, { headers: authHeaders });
+        console.log("[digest] API response:", res.status);
+
+        if (res.ok) {
+          const data = await res.json();
+          console.log("[digest] API data:", data.digest ? "has digest" : "no digest");
+          if (data.digest) {
+            setDigest(data.digest);
+            // Sync date picker to match returned digest (e.g. latest fallback)
+            if (data.digest.digest_date && data.digest.digest_date !== date) {
+              setSelectedDate(data.digest.digest_date);
+            }
           }
+        } else {
+          const body = await res.json().catch(() => ({}));
+          console.log("[digest] API error:", res.status, body);
+          setFetchError(body.error || `API error ${res.status}`);
         }
-      } else {
-        const body = await res.json().catch(() => ({}));
-        setFetchError(body.error || `API error ${res.status}`);
-      }
 
-      // Fetch trend signals (separate try so a failure here doesn't block digest display)
-      try {
-        const { data: signalsData } = await supabase
-          .from("field_trend_signals")
-          .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
-          .eq("is_active", true)
-          .order("severity", { ascending: false })
-          .limit(10);
+        // Fetch trend signals — non-critical, don't block digest display
+        try {
+          const { data: signalsData } = await supabase
+            .from("field_trend_signals")
+            .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
+            .eq("is_active", true)
+            .order("severity", { ascending: false })
+            .limit(10);
+          setTrends((signalsData as TrendSignal[]) || []);
+        } catch {
+          console.log("[digest] trend signals fetch failed (non-critical)");
+        }
 
-        setTrends((signalsData as TrendSignal[]) || []);
-      } catch {
-        // Trend signals are non-critical — don't block the page
-      }
+        console.log("[digest] fetch complete");
+      })()]);
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setFetchError("Request timed out — please try again");
-      } else {
-        setFetchError(err instanceof Error ? err.message : "Failed to load digest");
-      }
-      console.error("Failed to fetch digest:", err);
+      const msg = err instanceof Error ? err.message : "Failed to load digest";
+      setFetchError(msg);
+      console.error("[digest] fetch error:", msg);
     } finally {
-      clearTimeout(timeout);
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
