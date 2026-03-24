@@ -19,6 +19,8 @@ interface DigestSummary {
   total_follow_ups_needed: number;
   key_highlights: string | null;
   generated_at: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rep_activity_breakdown: any;
 }
 
 export function DailyDigestCard() {
@@ -33,14 +35,12 @@ export function DailyDigestCard() {
     }
 
     const supabase = createBrowserClient();
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateStr = yesterday.toISOString().split("T")[0];
 
     supabase
       .from("daily_digests")
-      .select("digest_date, total_calls_logged, total_follow_ups_needed, key_highlights, generated_at")
-      .eq("digest_date", dateStr)
+      .select("digest_date, total_calls_logged, total_follow_ups_needed, key_highlights, generated_at, rep_activity_breakdown")
+      .order("digest_date", { ascending: false })
+      .limit(1)
       .single()
       .then(({ data }) => {
         setDigest(data || null);
@@ -52,10 +52,17 @@ export function DailyDigestCard() {
   if (!isAdmin) return null;
   if (loading) return null;
 
-  // Extract executive summary (text before first ## heading)
-  const executiveSummary = digest?.key_highlights
-    ? digest.key_highlights.split(/^## /m)[0].trim()
-    : null;
+  // Extract executive summary — prefer structured data, fall back to key_highlights
+  const structured = digest?.rep_activity_breakdown;
+  const isStructured = structured && typeof structured === "object" && !Array.isArray(structured) && "executive_summary" in structured;
+  const executiveSummary = isStructured
+    ? (structured as { executive_summary?: string }).executive_summary || null
+    : digest?.key_highlights
+      ? digest.key_highlights.split(/^## /m)[0].trim()
+      : null;
+  const pipelineValue = isStructured
+    ? (structured as { pipeline_snapshot?: { total_pipeline_value?: number } }).pipeline_snapshot?.total_pipeline_value
+    : undefined;
 
   return (
     <Card>
@@ -88,6 +95,12 @@ export function DailyDigestCard() {
                 <span className="font-semibold">{digest.total_follow_ups_needed}</span>{" "}
                 <span className="text-muted-foreground">follow-ups</span>
               </div>
+              {pipelineValue != null && pipelineValue > 0 && (
+                <div>
+                  <span className="font-semibold">${(pipelineValue / 1000).toFixed(0)}K</span>{" "}
+                  <span className="text-muted-foreground">pipeline</span>
+                </div>
+              )}
             </div>
 
             {/* Summary snippet */}
@@ -108,7 +121,7 @@ export function DailyDigestCard() {
         ) : (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              No digest generated for yesterday.
+              No digest available yet.
             </p>
             <Link
               href="/digest"

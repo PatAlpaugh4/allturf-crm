@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -14,16 +14,22 @@ import {
 } from "@/components/ui/card";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowUp,
+  BarChart3,
   Bug,
   Calendar,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
+  DollarSign,
+  Eye,
   Loader2,
   Mail,
+  Map,
   Package,
+  Shield,
   Sparkles,
   TrendingUp,
   User,
@@ -36,6 +42,11 @@ import type {
   ReorderRequest,
   DiseaseWatch,
   ActionItemRollup,
+  PipelineSnapshot,
+  RevenueSignals,
+  TerritoryCoverage,
+  CompetitiveIntelligence,
+  WeekOverWeek,
 } from "@/lib/digest-generator";
 
 interface DigestData {
@@ -93,6 +104,7 @@ export default function DigestPage() {
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const userChangedDateRef = useRef(false);
 
   const fetchDigest = useCallback(async () => {
     setLoading(true);
@@ -102,9 +114,34 @@ export default function DigestPage() {
     const authHeaders: Record<string, string> = {};
     if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
     const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}`, { headers: authHeaders });
+    let foundDigest = false;
     if (res.ok) {
       const data = await res.json();
-      setDigest(data.digest || null);
+      if (data.digest) {
+        setDigest(data.digest);
+        foundDigest = true;
+      }
+    }
+
+    // If no digest for selected date and user hasn't manually changed dates,
+    // fall back to the most recent available digest
+    if (!foundDigest && !userChangedDateRef.current) {
+      try {
+        const { data: latestDigest } = await supabase
+          .from("daily_digests")
+          .select("digest_date")
+          .order("digest_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestDigest && latestDigest.digest_date !== selectedDate) {
+          setSelectedDate(latestDigest.digest_date);
+          setLoading(false);
+          return; // Will re-fetch via the selectedDate effect
+        }
+      } catch {
+        // Fallback query failed — continue showing empty state
+      }
     }
 
     const { data: signalsData } = await supabase
@@ -116,6 +153,7 @@ export default function DigestPage() {
 
     setTrends((signalsData as TrendSignal[]) || []);
     setLoading(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, supabase]);
 
   useEffect(() => {
@@ -160,13 +198,20 @@ export default function DigestPage() {
   };
 
   const navigateDate = (direction: -1 | 1) => {
+    userChangedDateRef.current = true;
     const d = new Date(selectedDate + "T12:00:00Z");
     d.setDate(d.getDate() + direction);
     setSelectedDate(d.toISOString().split("T")[0]);
   };
 
-  // Extract structured data (new format) or fall back
-  const structured = digest?.rep_activity_breakdown as DigestStructuredData | null;
+  // Extract structured data (new format) or fall back — guard against old flat-array format
+  const structured = (() => {
+    const val = digest?.rep_activity_breakdown;
+    if (val != null && typeof val === "object" && !Array.isArray(val) && "executive_summary" in val) {
+      return val as DigestStructuredData;
+    }
+    return null;
+  })();
 
   return (
     <div className="page-enter mx-auto max-w-3xl space-y-8 pb-12 pt-2">
@@ -189,7 +234,7 @@ export default function DigestPage() {
               <input
                 type="date"
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => { userChangedDateRef.current = true; setSelectedDate(e.target.value); }}
                 className="bg-transparent border-none outline-none text-sm w-[130px]"
               />
             </div>
@@ -305,6 +350,9 @@ export default function DigestPage() {
 
           {digest.total_calls_logged > 0 && structured && (
             <>
+              {/* Week-over-week metrics bar */}
+              <WeekOverWeekBar data={structured.week_over_week} />
+
               {/* a. Executive Summary */}
               {structured.executive_summary && (
                 <Card className="relative overflow-hidden border-0 shadow-[var(--shadow-elevated)] bg-gradient-to-br from-primary/[0.04] via-card to-card">
@@ -322,17 +370,29 @@ export default function DigestPage() {
                 </Card>
               )}
 
+              {/* Pipeline Snapshot */}
+              <PipelineSnapshotSection data={structured.pipeline_snapshot} />
+
+              {/* Revenue Signals */}
+              <RevenueSignalsSection data={structured.revenue_signals} />
+
               {/* b. Rep Activity Breakdown */}
               <RepActivitySection
                 reps={structured.rep_activity || []}
                 inactiveReps={structured.inactive_reps || []}
               />
 
+              {/* Territory Coverage */}
+              <TerritoryCoverageSection data={structured.territory_coverage} />
+
               {/* c. Demand Intelligence */}
               <DemandIntelligenceSection
                 products={structured.demand_intelligence?.products_in_demand || []}
                 reorders={structured.demand_intelligence?.reorder_requests || []}
               />
+
+              {/* Competitor Intelligence */}
+              <CompetitorIntelligenceSection data={structured.competitive_intelligence} />
 
               {/* d. Disease/Pest Watch */}
               <DiseaseWatchSection diseases={structured.disease_watch || []} />
@@ -838,6 +898,289 @@ function ActionItemsSection({ rollup }: { rollup: ActionItemRollup[] }) {
             )}
           </div>
         ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Week-over-Week Bar
+// ---------------------------------------------------------------------------
+
+function WeekOverWeekBar({ data }: { data?: WeekOverWeek }) {
+  if (!data) return null;
+
+  const metrics = [
+    {
+      label: "Calls",
+      current: data.calls_this_week,
+      previous: data.calls_last_week,
+      change: data.calls_change_percent,
+    },
+    {
+      label: "Accounts",
+      current: data.accounts_this_week,
+      previous: data.accounts_last_week,
+      change: data.accounts_last_week > 0
+        ? Math.round(((data.accounts_this_week - data.accounts_last_week) / data.accounts_last_week) * 100)
+        : 0,
+    },
+    {
+      label: "Pipeline",
+      current: data.pipeline_this_week,
+      previous: data.pipeline_last_week,
+      change: data.pipeline_last_week > 0
+        ? Math.round(((data.pipeline_this_week - data.pipeline_last_week) / data.pipeline_last_week) * 100)
+        : 0,
+      isCurrency: true,
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {metrics.map((m) => (
+        <div key={m.label} className="flex items-center gap-2 rounded-lg bg-secondary/40 px-3 py-2.5">
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60">{m.label} (WoW)</p>
+            <p className="text-sm font-semibold tabular-nums">
+              {m.isCurrency ? `$${(m.current / 1000).toFixed(0)}K` : m.current}
+            </p>
+          </div>
+          {m.change !== 0 && (
+            <div className={cn(
+              "flex items-center gap-0.5 text-xs font-medium",
+              m.change > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+            )}>
+              {m.change > 0 ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+              {Math.abs(m.change)}%
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline Snapshot Section
+// ---------------------------------------------------------------------------
+
+function PipelineSnapshotSection({ data }: { data?: PipelineSnapshot }) {
+  if (!data) return null;
+
+  return (
+    <Card className="border-border/30">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <DollarSign className="h-4 w-4 text-primary" />
+          Pipeline Snapshot
+          <span className="ml-auto text-[11px] font-normal normal-case tracking-normal text-muted-foreground/60">
+            ${(data.total_pipeline_value / 1000).toFixed(0)}K total
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* New deals today */}
+        {data.new_deals_count > 0 && (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{data.new_deals_count} new deal{data.new_deals_count !== 1 ? "s" : ""}</span>{" "}
+            today worth <span className="font-medium text-foreground">${(data.new_deals_value / 1000).toFixed(1)}K</span>
+          </p>
+        )}
+
+        {/* Stage breakdown */}
+        {data.stage_breakdown.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 mb-2">By Stage</p>
+            <div className="space-y-1.5">
+              {data.stage_breakdown.map((s) => (
+                <div key={s.stage} className="flex items-center gap-2 text-xs">
+                  <span className="w-24 truncate capitalize text-muted-foreground">{s.stage.replace(/_/g, " ")}</span>
+                  <div className="flex-1 h-2 rounded-full bg-secondary/60 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-primary/60"
+                      style={{ width: `${data.total_pipeline_value > 0 ? (s.value / data.total_pipeline_value) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-muted-foreground tabular-nums w-14 text-right">${(s.value / 1000).toFixed(0)}K</span>
+                  <span className="text-muted-foreground/50 tabular-nums w-6 text-right">{s.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Deals closing this week */}
+        {data.deals_closing_this_week.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 mb-2">Closing This Week</p>
+            <div className="divide-y divide-border/20">
+              {data.deals_closing_this_week.slice(0, 5).map((d, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 text-xs py-2 first:pt-0 last:pb-0">
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{d.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{d.company_name}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-semibold tabular-nums">${(d.value / 1000).toFixed(1)}K</span>
+                    <Badge variant="outline" className="text-[9px] h-4 border-border/30 text-muted-foreground/80 capitalize">
+                      {d.stage.replace(/_/g, " ")}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Revenue Signals Section
+// ---------------------------------------------------------------------------
+
+function RevenueSignalsSection({ data }: { data?: RevenueSignals }) {
+  if (!data) return null;
+
+  return (
+    <Card className="border-border/30">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-primary" />
+          Revenue Signals
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="text-center">
+            <p className="text-2xl font-bold tabular-nums">{data.quotes_sent_today}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Quotes Sent</p>
+            {data.quotes_total_value > 0 && (
+              <p className="text-[10px] text-muted-foreground">${(data.quotes_total_value / 1000).toFixed(1)}K</p>
+            )}
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-bold tabular-nums">{data.orders_placed_today}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Orders</p>
+            {data.orders_total_value > 0 && (
+              <p className="text-[10px] text-muted-foreground">${(data.orders_total_value / 1000).toFixed(1)}K</p>
+            )}
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-bold tabular-nums">{data.deliveries_today}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Deliveries</p>
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-bold tabular-nums">
+              ${((data.quotes_total_value + data.orders_total_value) / 1000).toFixed(0)}K
+            </p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">In Motion</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Territory Coverage Section
+// ---------------------------------------------------------------------------
+
+function TerritoryCoverageSection({ data }: { data?: TerritoryCoverage }) {
+  if (!data) return null;
+
+  return (
+    <Card className="border-border/30">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Map className="h-4 w-4 text-primary" />
+          Territory Coverage
+          <span className="ml-auto text-[11px] font-normal normal-case tracking-normal text-muted-foreground/60">
+            {data.coverage_percent}% today
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3 text-sm">
+          <span className="font-semibold">{data.accounts_touched_today}</span>
+          <span className="text-muted-foreground">of {data.total_accounts} accounts touched</span>
+        </div>
+
+        {/* Coverage bar */}
+        <div className="h-2 rounded-full bg-secondary/60 overflow-hidden">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all",
+              data.coverage_percent >= 50 ? "bg-emerald-500/70" :
+              data.coverage_percent >= 25 ? "bg-amber-500/70" :
+              "bg-rose-500/70"
+            )}
+            style={{ width: `${data.coverage_percent}%` }}
+          />
+        </div>
+
+        {/* Dark territories */}
+        {data.dark_territories.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 mb-2">
+              Dark Territories <span className="normal-case">(no activity in 3+ days)</span>
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {data.dark_territories.map((t) => (
+                <Badge key={t.territory} variant="outline" className="text-[10px] border-amber-300/50 text-amber-700 dark:text-amber-400 gap-1">
+                  <Eye className="h-2.5 w-2.5" />
+                  {t.territory}
+                  <span className="text-muted-foreground/60">{t.days_since_activity}d</span>
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Competitor Intelligence Section
+// ---------------------------------------------------------------------------
+
+function CompetitorIntelligenceSection({ data }: { data?: CompetitiveIntelligence }) {
+  if (!data || data.mentions.length === 0) return null;
+
+  return (
+    <Card className="border-border/30">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Shield className="h-4 w-4 text-primary" />
+          Competitive Intelligence
+          <span className="ml-auto text-[11px] font-normal normal-case tracking-normal text-muted-foreground/60">
+            {data.total_mentions} mention{data.total_mentions !== 1 ? "s" : ""}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="divide-y divide-border/20">
+          {data.mentions.slice(0, 6).map((m) => (
+            <div key={m.competitor_name} className="py-3 first:pt-0 last:pb-0 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{m.competitor_name}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{m.mention_count} mention{m.mention_count !== 1 ? "s" : ""}</span>
+              </div>
+              {m.context_snippets.length > 0 && (
+                <div className="space-y-1">
+                  {m.context_snippets.slice(0, 2).map((snippet, i) => (
+                    <p key={i} className="text-xs text-muted-foreground leading-relaxed line-clamp-2 pl-2 border-l-2 border-border/30">
+                      {snippet}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );

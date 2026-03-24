@@ -3147,6 +3147,16 @@ async function main() {
   } else if (existingDigestCount > 0 && requestedStep !== 20) {
     console.log(`  ${existingDigestCount} daily digests already exist, skipping\n`);
   } else {
+    // Delete existing digests when re-running step 20
+    if (existingDigestCount > 0 && requestedStep === 20) {
+      const { error: deleteError } = await supabase.from("daily_digests").delete().gte("digest_date", "2026-03-14").lte("digest_date", "2026-03-20");
+      if (deleteError) {
+        console.error("  ERROR deleting existing digests:", deleteError.message);
+      } else {
+        console.log(`  Deleted ${existingDigestCount} existing demo digests for re-import`);
+      }
+    }
+
     // Group call logs by day for accurate counts
     const callsByDay = new Map<string, CallLogMeta[]>();
     for (const cl of callLogMetas) {
@@ -3224,41 +3234,181 @@ async function main() {
         });
       }
 
-      // Rep activity breakdown
-      const repActivity = new Map<string, { calls: number; followUps: number; companies: Set<string> }>();
+      // Rep activity breakdown — build as DigestStructuredData format
+      const repActivityMap = new Map<string, { calls: number; followUps: number; companies: Set<string> }>();
       for (const cl of dayCalls) {
         if (!cl.repId) continue;
-        const existing = repActivity.get(cl.repId) || { calls: 0, followUps: 0, companies: new Set<string>() };
+        const existing = repActivityMap.get(cl.repId) || { calls: 0, followUps: 0, companies: new Set<string>() };
         existing.calls++;
         if (rng() < 0.6) existing.followUps++;
         existing.companies.add(cl.companyId);
-        repActivity.set(cl.repId, existing);
+        repActivityMap.set(cl.repId, existing);
       }
-      const repActivityBreakdown = Array.from(repActivity.entries()).map(([repId, data]) => ({
-        rep_id: repId,
-        rep_name: repNameByIdForDigest.get(repId) || "Unknown Rep",
-        calls_logged: data.calls,
-        follow_ups_needed: data.followUps,
-        top_companies: Array.from(data.companies).slice(0, 3).map((cId) => companyNameByIdForCalls.get(cId) || "Unknown"),
-      }));
 
-      // Key highlights
+      const repActivityArr = Array.from(repActivityMap.entries()).map(([repId, data]) => {
+        const repName = repNameByIdForDigest.get(repId) || "Unknown Rep";
+        const territory = DEMO_REPS.find((r) => repMap.get(r.territory) === repId)?.territory || null;
+        return {
+          rep_id: repId,
+          rep_name: repName,
+          territory,
+          calls_logged: data.calls,
+          accounts_touched: Array.from(data.companies).slice(0, 4).map((cId) => companyNameByIdForCalls.get(cId) || "Unknown"),
+          commitments: data.followUps > 0
+            ? [{ description: "Follow up on product sample", deadline: digestDateStr }]
+            : [],
+          sentiment_summary: {
+            positive: Math.floor(data.calls * 0.5),
+            neutral: Math.ceil(data.calls * 0.3),
+            concerned: Math.floor(data.calls * 0.15),
+            urgent: data.calls > 3 ? 1 : 0,
+          },
+        };
+      });
+
+      // Inactive reps
+      const activeRepIds = new Set(repActivityMap.keys());
+      const inactiveRepsForDigest = DEMO_REPS
+        .filter((r) => { const id = repMap.get(r.territory); return id && !activeRepIds.has(id); })
+        .map((r) => ({ name: r.name, territory: r.territory }));
+
+      // Key highlights / executive summary
       const dayOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][digestDate.getDay()];
-      let keyHighlights = `${dayOfWeek}, ${digestDateStr}: ${totalCalls || randomInt(8, 15)} calls logged across all territories.`;
+      let executiveSummary = `${dayOfWeek}, ${digestDateStr}: ${totalCalls || randomInt(8, 15)} calls logged across all territories.`;
       if (dayOffset >= 3) {
-        keyHighlights += ` Dollar Spot reports continue to increase in the GTA and Golden Horseshoe regions. ${randomInt(2, 4)} new courses reported active outbreaks today.`;
+        executiveSummary += ` Dollar Spot reports continue to increase in the GTA and Golden Horseshoe regions. ${randomInt(2, 4)} new courses reported active outbreaks today.`;
       }
       if (dayOffset >= 5) {
-        keyHighlights += ` Banner Maxx II demand at 3x normal levels. Recommend checking distributor inventory. Early season disease pressure running 40% above average.`;
+        executiveSummary += ` Banner Maxx II demand at 3x normal levels. Recommend checking distributor inventory. Early season disease pressure running 40% above average.`;
       }
       if (dayOffset < 3) {
-        keyHighlights += ` Normal spring activity levels. Reps focused on seasonal program quotation and early spring site visits.`;
+        executiveSummary += ` Normal spring activity levels. Reps focused on seasonal program quotation and early spring site visits.`;
       }
+
+      // Pipeline snapshot
+      const pipelineBase = 180000 + dayOffset * 20000 + randomInt(0, 30000);
+      const pipelineSnapshot = {
+        total_pipeline_value: pipelineBase,
+        new_deals_count: randomInt(1, 4),
+        new_deals_value: randomInt(8000, 25000),
+        stage_breakdown: [
+          { stage: "qualification", count: randomInt(3, 6), value: Math.round(pipelineBase * 0.2) },
+          { stage: "proposal", count: randomInt(4, 8), value: Math.round(pipelineBase * 0.35) },
+          { stage: "negotiation", count: randomInt(2, 5), value: Math.round(pipelineBase * 0.3) },
+          { stage: "verbal_commit", count: randomInt(1, 3), value: Math.round(pipelineBase * 0.15) },
+        ],
+        deals_closing_this_week: [
+          { name: "Spring Fungicide Program", company_name: "St. George's G&CC", value: randomInt(12000, 28000), stage: "negotiation" },
+          { name: "Annual Wetting Agent Supply", company_name: "Rattlesnake Point GC", value: randomInt(8000, 15000), stage: "verbal_commit" },
+        ],
+      };
+
+      // Revenue signals
+      const revenueSignals = {
+        quotes_sent_today: randomInt(2, 4),
+        quotes_total_value: randomInt(15000, 45000),
+        orders_placed_today: randomInt(1, 3),
+        orders_total_value: randomInt(8000, 30000),
+        deliveries_today: randomInt(1, 4),
+      };
+
+      // Territory coverage
+      const territoryCoverage = {
+        total_accounts: 85,
+        accounts_touched_today: randomInt(8, 18),
+        coverage_percent: randomInt(9, 21),
+        dark_territories: dayOffset < 3
+          ? [{ territory: "Ottawa Valley", days_since_activity: randomInt(3, 6) }, { territory: "Niagara", days_since_activity: randomInt(3, 5) }]
+          : [{ territory: "Ottawa Valley", days_since_activity: randomInt(4, 7) }],
+      };
+
+      // Competitive intelligence
+      const competitiveIntelligence = {
+        mentions: [
+          { competitor_name: "Plant Products", mention_count: randomInt(1, 3), context_snippets: ["Superintendent mentioned Plant Products pricing on fungicides was competitive this season."] },
+          ...(dayOffset >= 2 ? [{ competitor_name: "Nutrite", mention_count: randomInt(1, 2), context_snippets: ["Nutrite rep was seen at Oakville Golf Club last week pushing fertilizer programs."] }] : []),
+        ],
+        total_mentions: randomInt(2, 5),
+      };
+
+      // Week-over-week
+      const callsThisWeek = (totalCalls || randomInt(8, 15)) * (dayOffset + 1);
+      const callsLastWeek = Math.round(callsThisWeek * (0.8 + rng() * 0.3));
+      const weekOverWeek = {
+        calls_this_week: callsThisWeek,
+        calls_last_week: callsLastWeek,
+        calls_change_percent: callsLastWeek > 0 ? Math.round(((callsThisWeek - callsLastWeek) / callsLastWeek) * 100) : 0,
+        accounts_this_week: randomInt(15, 30),
+        accounts_last_week: randomInt(12, 28),
+        pipeline_this_week: pipelineBase,
+        pipeline_last_week: Math.round(pipelineBase * (0.85 + rng() * 0.2)),
+      };
+
+      // Disease watch
+      const diseaseWatch = topDiseases.map((d) => ({
+        disease_name: d.disease_name,
+        mention_count: d.mention_count,
+        rep_count: Math.min(d.mention_count, randomInt(1, 4)),
+        regions: d.affected_regions,
+        trending: d.trending ? "up" as const : "stable" as const,
+        related_products: d.disease_name === "Dollar Spot" ? ["Banner Maxx II", "Instrata"] : ["Daconil"],
+      }));
+
+      // Action items rollup
+      const actionItemsRollup = repActivityArr.slice(0, 3).map((rep) => ({
+        rep_name: rep.rep_name,
+        rep_id: rep.rep_id,
+        items: [
+          { description: "Follow up on pricing request", type: "follow_up_call", due_date: digestDateStr, company_name: rep.accounts_touched[0] || null, status: "due_today" as const },
+          ...(rng() > 0.5 ? [{ description: "Send product samples", type: "send_sample", due_date: null, company_name: null, status: "pending" as const }] : []),
+        ],
+      }));
+
+      // Demand intelligence
+      const demandIntelligence = {
+        products_in_demand: topProducts.map((p) => ({
+          product_name: p.product_name,
+          product_id: p.product_id,
+          mention_count: p.request_count + randomInt(1, 3),
+          request_count: p.request_count,
+          inventory_on_hand: randomInt(20, 200),
+          reorder_point: randomInt(15, 50),
+          is_low_stock: rng() < 0.2,
+        })),
+        reorder_requests: topProducts.slice(0, 2).map((p) => ({
+          product_name: p.product_name,
+          customer_name: "Demo Golf Club",
+          rep_name: repActivityArr[0]?.rep_name || "Unknown",
+          quantity: randomInt(5, 20),
+          needed_by: digestDateStr,
+        })),
+      };
+
+      // Build full structured data
+      const structuredDigestData = {
+        executive_summary: executiveSummary,
+        rep_activity: repActivityArr,
+        inactive_reps: inactiveRepsForDigest,
+        demand_intelligence: demandIntelligence,
+        disease_watch: diseaseWatch,
+        action_items_rollup: actionItemsRollup,
+        sentiment_totals: {
+          positive: repActivityArr.reduce((s, r) => s + r.sentiment_summary.positive, 0),
+          neutral: repActivityArr.reduce((s, r) => s + r.sentiment_summary.neutral, 0),
+          concerned: repActivityArr.reduce((s, r) => s + r.sentiment_summary.concerned, 0),
+          urgent: repActivityArr.reduce((s, r) => s + r.sentiment_summary.urgent, 0),
+        },
+        pipeline_snapshot: pipelineSnapshot,
+        revenue_signals: revenueSignals,
+        territory_coverage: territoryCoverage,
+        competitive_intelligence: competitiveIntelligence,
+        week_over_week: weekOverWeek,
+      };
 
       // Alerts
       let alerts = "";
       if (dayOffset >= 4) {
-        alerts = "⚠ Dollar Spot outbreak trending in GTA & Golden Horseshoe — proactive outreach recommended. Banner Maxx II stock levels should be monitored.";
+        alerts = "Dollar Spot outbreak trending in GTA & Golden Horseshoe — proactive outreach recommended. Banner Maxx II stock levels should be monitored.";
       } else if (dayOffset >= 2) {
         alerts = "Dollar Spot reports increasing — monitor closely over next 48 hours.";
       } else {
@@ -3271,8 +3421,8 @@ async function main() {
         total_follow_ups_needed: followUpCalls || randomInt(3, 8),
         top_diseases: topDiseases,
         top_products: topProducts,
-        rep_activity_breakdown: repActivityBreakdown,
-        key_highlights: keyHighlights,
+        rep_activity_breakdown: structuredDigestData,
+        key_highlights: executiveSummary,
         alerts,
         generated_at: new Date(digestDate.getTime() + 23 * 60 * 60 * 1000).toISOString(), // 11pm that day
       });

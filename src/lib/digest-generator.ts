@@ -83,6 +83,44 @@ export interface DiseaseWatch {
   related_products: string[];
 }
 
+export interface PipelineSnapshot {
+  total_pipeline_value: number;
+  new_deals_count: number;
+  new_deals_value: number;
+  stage_breakdown: Array<{ stage: string; count: number; value: number }>;
+  deals_closing_this_week: Array<{ name: string; company_name: string; value: number; stage: string }>;
+}
+
+export interface RevenueSignals {
+  quotes_sent_today: number;
+  quotes_total_value: number;
+  orders_placed_today: number;
+  orders_total_value: number;
+  deliveries_today: number;
+}
+
+export interface TerritoryCoverage {
+  total_accounts: number;
+  accounts_touched_today: number;
+  coverage_percent: number;
+  dark_territories: Array<{ territory: string; days_since_activity: number }>;
+}
+
+export interface CompetitiveIntelligence {
+  mentions: Array<{ competitor_name: string; mention_count: number; context_snippets: string[] }>;
+  total_mentions: number;
+}
+
+export interface WeekOverWeek {
+  calls_this_week: number;
+  calls_last_week: number;
+  calls_change_percent: number;
+  accounts_this_week: number;
+  accounts_last_week: number;
+  pipeline_this_week: number;
+  pipeline_last_week: number;
+}
+
 // All structured data embedded in the digest record
 export interface DigestStructuredData {
   executive_summary: string;
@@ -96,6 +134,11 @@ export interface DigestStructuredData {
   action_items_rollup: ActionItemRollup[];
   sentiment_totals: { positive: number; neutral: number; concerned: number; urgent: number };
   diagnostics?: DigestDiagnostics;
+  pipeline_snapshot?: PipelineSnapshot;
+  revenue_signals?: RevenueSignals;
+  territory_coverage?: TerritoryCoverage;
+  competitive_intelligence?: CompetitiveIntelligence;
+  week_over_week?: WeekOverWeek;
 }
 
 interface DayActivity {
@@ -229,6 +272,30 @@ export async function generateDailyDigest(date: Date): Promise<DigestResult> {
   // Gather previous period disease counts for trending detection
   const prevDiseaseCounts = await gatherPreviousPeriodDiseases(date, supabase);
 
+  // Gather new sections in parallel
+  const [pipelineSnapshot, revenueSignals, territoryCoverage, weekOverWeek] = await Promise.all([
+    gatherPipelineData(date, supabase).catch(() => undefined),
+    gatherRevenueSignals(date, supabase).catch(() => undefined),
+    gatherTerritoryCoverage(date, activity, supabase).catch(() => undefined),
+    gatherWeekOverWeek(date, supabase).catch(() => undefined),
+  ]);
+
+  // Gather competitive intelligence from raw call logs
+  const dayStart = new Date(date);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(date);
+  dayEnd.setUTCHours(23, 59, 59, 999);
+  const { data: rawCallLogs } = await supabase
+    .from("call_logs")
+    .select("extraction:call_log_extractions(competitor_mentions, summary)")
+    .gte("created_at", dayStart.toISOString())
+    .lte("created_at", dayEnd.toISOString())
+    .eq("processing_status", "completed");
+  const competitiveIntelligence = gatherCompetitiveIntelligence(
+    activity,
+    (rawCallLogs || []) as Array<{ extraction: unknown }>
+  );
+
   // Build structured data
   const repActivity = buildRepActivity(activity);
   const demandIntelligence = buildDemandIntelligence(activity, inventoryMap);
@@ -240,7 +307,8 @@ export async function generateDailyDigest(date: Date): Promise<DigestResult> {
 
   // Generate AI executive summary
   const executiveSummary = await generateExecutiveSummary(
-    activity, repActivity, demandIntelligence, diseaseWatchResolved, actionItemsRollup, trends
+    activity, repActivity, demandIntelligence, diseaseWatchResolved, actionItemsRollup, trends,
+    pipelineSnapshot, competitiveIntelligence, territoryCoverage, weekOverWeek
   );
 
   const structuredData: DigestStructuredData = {
@@ -254,6 +322,11 @@ export async function generateDailyDigest(date: Date): Promise<DigestResult> {
     disease_watch: diseaseWatchResolved,
     action_items_rollup: actionItemsRollup,
     sentiment_totals: activity.sentimentBreakdown,
+    pipeline_snapshot: pipelineSnapshot,
+    revenue_signals: revenueSignals,
+    territory_coverage: territoryCoverage,
+    competitive_intelligence: competitiveIntelligence,
+    week_over_week: weekOverWeek,
   };
 
   // Aggregate counts for top-level columns
@@ -577,6 +650,299 @@ async function gatherDayActivity(
   };
 }
 
+// ---------------------------------------------------------------------------
+// New data gathering: pipeline, revenue, territory, competitors, WoW
+// ---------------------------------------------------------------------------
+
+async function gatherPipelineData(
+  date: Date,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<PipelineSnapshot | undefined> {
+  const digestDate = formatDate(date);
+  const weekEnd = new Date(date);
+  weekEnd.setDate(weekEnd.getDate() + (7 - weekEnd.getDay()));
+  const weekEndStr = formatDate(weekEnd);
+
+  // Open pipeline — exclude terminal stages
+  const { data: deals } = await supabase
+    .from("deals")
+    .select("id, name, stage, value_cad, company:companies(name), created_at, expected_delivery_date")
+    .not("stage", "in", '("Closed Lost","Paid","Delivered","Invoiced")');
+
+  if (!deals || deals.length === 0) return undefined;
+
+  const stageMap = new Map<string, { count: number; value: number }>();
+  let totalValue = 0;
+  let newCount = 0;
+  let newValue = 0;
+  const closingThisWeek: PipelineSnapshot["deals_closing_this_week"] = [];
+
+  for (const d of deals) {
+    const val = Number(d.value_cad) || 0;
+    totalValue += val;
+
+    const stage = d.stage || "unknown";
+    const existing = stageMap.get(stage) || { count: 0, value: 0 };
+    existing.count++;
+    existing.value += val;
+    stageMap.set(stage, existing);
+
+    if (d.created_at && d.created_at.startsWith(digestDate)) {
+      newCount++;
+      newValue += val;
+    }
+
+    if (d.expected_delivery_date && d.expected_delivery_date <= weekEndStr && d.expected_delivery_date >= digestDate) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const companyName = (d.company as any)?.name || "Unknown";
+      closingThisWeek.push({ name: d.name || "Untitled", company_name: companyName, value: val, stage });
+    }
+  }
+
+  return {
+    total_pipeline_value: totalValue,
+    new_deals_count: newCount,
+    new_deals_value: newValue,
+    stage_breakdown: Array.from(stageMap.entries())
+      .map(([stage, data]) => ({ stage, ...data }))
+      .sort((a, b) => b.value - a.value),
+    deals_closing_this_week: closingThisWeek.sort((a, b) => b.value - a.value).slice(0, 10),
+  };
+}
+
+async function gatherRevenueSignals(
+  date: Date,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<RevenueSignals | undefined> {
+  const digestDate = formatDate(date);
+
+  // Quotes = deals in "Quote Sent" stage updated today
+  const { data: quotes } = await supabase
+    .from("deals")
+    .select("value_cad")
+    .eq("stage", "Quote Sent")
+    .gte("updated_at", digestDate + "T00:00:00")
+    .lte("updated_at", digestDate + "T23:59:59");
+
+  // Orders = deals in "Order Placed" stage updated today
+  const { data: orders } = await supabase
+    .from("deals")
+    .select("value_cad")
+    .eq("stage", "Order Placed")
+    .gte("updated_at", digestDate + "T00:00:00")
+    .lte("updated_at", digestDate + "T23:59:59");
+
+  // Deliveries
+  const { data: deliveries } = await supabase
+    .from("order_deliveries")
+    .select("id")
+    .gte("scheduled_date", digestDate)
+    .lte("scheduled_date", digestDate);
+
+  const quotesCount = quotes?.length || 0;
+  const quotesValue = quotes?.reduce((s, q) => s + (Number(q.value_cad) || 0), 0) || 0;
+  const ordersCount = orders?.length || 0;
+  const ordersValue = orders?.reduce((s, o) => s + (Number(o.value_cad) || 0), 0) || 0;
+  const deliveriesCount = deliveries?.length || 0;
+
+  if (quotesCount === 0 && ordersCount === 0 && deliveriesCount === 0) return undefined;
+
+  return {
+    quotes_sent_today: quotesCount,
+    quotes_total_value: quotesValue,
+    orders_placed_today: ordersCount,
+    orders_total_value: ordersValue,
+    deliveries_today: deliveriesCount,
+  };
+}
+
+async function gatherTerritoryCoverage(
+  date: Date,
+  activity: DayActivity,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<TerritoryCoverage | undefined> {
+  const digestDate = formatDate(date);
+
+  // Total accounts
+  const { count: totalAccounts } = await supabase
+    .from("companies")
+    .select("id", { count: "exact", head: true });
+
+  const total = totalAccounts || 0;
+  if (total === 0) return undefined;
+
+  const touchedToday = new Set<string>();
+  activity.callsByRep.forEach((rep) => {
+    rep.accounts.forEach((a) => touchedToday.add(a));
+  });
+
+  // Dark territories: territories with no activity in last 3 days
+  const threeDaysAgo = new Date(date);
+  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+  const { data: recentActivity } = await supabase
+    .from("call_logs")
+    .select("rep:user_profiles(territory)")
+    .gte("created_at", threeDaysAgo.toISOString())
+    .lte("created_at", digestDate + "T23:59:59")
+    .eq("processing_status", "completed");
+
+  const activeTerritoriesSet = new Set<string>();
+  if (recentActivity) {
+    for (const r of recentActivity) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const territory = (r.rep as any)?.territory;
+      if (territory) activeTerritoriesSet.add(territory);
+    }
+  }
+
+  // All territories
+  const { data: allTerritories } = await supabase
+    .from("user_profiles")
+    .select("territory")
+    .eq("is_active", true)
+    .not("territory", "is", null);
+
+  const allTerritorySet = new Set<string>();
+  if (allTerritories) {
+    for (const t of allTerritories) {
+      if (t.territory) allTerritorySet.add(t.territory);
+    }
+  }
+
+  const darkTerritories: TerritoryCoverage["dark_territories"] = [];
+  Array.from(allTerritorySet).forEach((t) => {
+    if (!activeTerritoriesSet.has(t)) {
+      darkTerritories.push({ territory: t, days_since_activity: 3 });
+    }
+  });
+
+  return {
+    total_accounts: total,
+    accounts_touched_today: touchedToday.size,
+    coverage_percent: total > 0 ? Math.round((touchedToday.size / total) * 100) : 0,
+    dark_territories: darkTerritories,
+  };
+}
+
+function gatherCompetitiveIntelligence(
+  activity: DayActivity,
+  callLogs: Array<{ extraction: unknown }>
+): CompetitiveIntelligence | undefined {
+  const mentionsMap = new Map<string, { count: number; snippets: string[] }>();
+
+  // We re-process from the callLogs to extract competitor_mentions
+  // This data was fetched in gatherDayActivity but not aggregated
+  for (const log of callLogs) {
+    const extraction = Array.isArray(log.extraction)
+      ? (log.extraction as unknown[])[0]
+      : log.extraction;
+    if (!extraction) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ext = extraction as any;
+    if (Array.isArray(ext.competitor_mentions)) {
+      for (const mention of ext.competitor_mentions) {
+        const name = typeof mention === "string" ? mention : mention?.name || mention?.competitor;
+        if (!name) continue;
+        const key = name.trim();
+        const existing = mentionsMap.get(key) || { count: 0, snippets: [] };
+        existing.count++;
+        const snippet = typeof mention === "object" && mention?.context ? mention.context : ext.summary?.slice(0, 80);
+        if (snippet && existing.snippets.length < 3) existing.snippets.push(snippet);
+        mentionsMap.set(key, existing);
+      }
+    }
+  }
+
+  if (mentionsMap.size === 0) return undefined;
+
+  const mentions = Array.from(mentionsMap.entries())
+    .map(([name, data]) => ({
+      competitor_name: name,
+      mention_count: data.count,
+      context_snippets: data.snippets,
+    }))
+    .sort((a, b) => b.mention_count - a.mention_count);
+
+  return {
+    mentions,
+    total_mentions: mentions.reduce((s, m) => s + m.mention_count, 0),
+  };
+}
+
+async function gatherWeekOverWeek(
+  date: Date,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<WeekOverWeek | undefined> {
+  const dayOfWeek = date.getDay(); // 0=Sun
+  const thisWeekStart = new Date(date);
+  thisWeekStart.setDate(thisWeekStart.getDate() - dayOfWeek);
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const lastWeekEnd = new Date(thisWeekStart);
+  lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
+
+  const thisWeekStartStr = formatDate(thisWeekStart);
+  const digestDateStr = formatDate(date);
+  const lastWeekStartStr = formatDate(lastWeekStart);
+  const lastWeekEndStr = formatDate(lastWeekEnd);
+
+  // This week calls
+  const { count: callsThisWeek } = await supabase
+    .from("call_logs")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", thisWeekStartStr + "T00:00:00")
+    .lte("created_at", digestDateStr + "T23:59:59")
+    .eq("processing_status", "completed");
+
+  // Last week calls
+  const { count: callsLastWeek } = await supabase
+    .from("call_logs")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", lastWeekStartStr + "T00:00:00")
+    .lte("created_at", lastWeekEndStr + "T23:59:59")
+    .eq("processing_status", "completed");
+
+  const tw = callsThisWeek || 0;
+  const lw = callsLastWeek || 0;
+
+  // Pipeline this vs last week
+  const { data: pipelineNow } = await supabase
+    .from("deals")
+    .select("value_cad")
+    .not("stage", "in", '("Closed Lost","Paid","Delivered","Invoiced")');
+
+  const pipelineThisWeek = pipelineNow?.reduce((s, d) => s + (Number(d.value_cad) || 0), 0) || 0;
+
+  // Unique accounts touched this week
+  const { data: accountsThisWeekData } = await supabase
+    .from("call_logs")
+    .select("company_id")
+    .gte("created_at", thisWeekStartStr + "T00:00:00")
+    .lte("created_at", digestDateStr + "T23:59:59")
+    .eq("processing_status", "completed");
+
+  const { data: accountsLastWeekData } = await supabase
+    .from("call_logs")
+    .select("company_id")
+    .gte("created_at", lastWeekStartStr + "T00:00:00")
+    .lte("created_at", lastWeekEndStr + "T23:59:59")
+    .eq("processing_status", "completed");
+
+  const uniqueThisWeek = new Set(accountsThisWeekData?.map((r) => r.company_id).filter(Boolean) || []).size;
+  const uniqueLastWeek = new Set(accountsLastWeekData?.map((r) => r.company_id).filter(Boolean) || []).size;
+
+  return {
+    calls_this_week: tw,
+    calls_last_week: lw,
+    calls_change_percent: lw > 0 ? Math.round(((tw - lw) / lw) * 100) : 0,
+    accounts_this_week: uniqueThisWeek,
+    accounts_last_week: uniqueLastWeek,
+    pipeline_this_week: pipelineThisWeek,
+    pipeline_last_week: pipelineThisWeek, // Approximation — no historical snapshot
+  };
+}
+
 async function gatherTrendContext(
   supabase: ReturnType<typeof createServiceClient>
 ): Promise<TrendContext> {
@@ -847,7 +1213,11 @@ async function generateExecutiveSummary(
   demand: DigestStructuredData["demand_intelligence"],
   diseases: DiseaseWatch[],
   actionItems: ActionItemRollup[],
-  trends: TrendContext
+  trends: TrendContext,
+  pipeline?: PipelineSnapshot,
+  competitive?: CompetitiveIntelligence,
+  territory?: TerritoryCoverage,
+  wow?: WeekOverWeek
 ): Promise<string> {
   const llm = getLLM();
 
@@ -910,7 +1280,11 @@ FIELD DATA:
 - Commitments made: ${totalCommitments}
 - Action items due today: ${totalDueToday}, overdue: ${totalOverdue}
 - Urgent/concerned calls: ${urgentSummary || "None"}
-- Trend alerts: ${trendSummary || "None active"}`;
+- Trend alerts: ${trendSummary || "None active"}
+- Pipeline: ${pipeline ? `$${(pipeline.total_pipeline_value / 1000).toFixed(0)}K total, ${pipeline.new_deals_count} new deals today ($${(pipeline.new_deals_value / 1000).toFixed(0)}K), ${pipeline.deals_closing_this_week.length} closing this week` : "No pipeline data"}
+- Competitors: ${competitive ? competitive.mentions.map((m) => `${m.competitor_name}: ${m.mention_count} mentions`).join("; ") : "No mentions"}
+- Territory coverage: ${territory ? `${territory.coverage_percent}% today (${territory.accounts_touched_today}/${territory.total_accounts})${territory.dark_territories.length > 0 ? `, dark: ${territory.dark_territories.map((t) => t.territory).join(", ")}` : ""}` : "N/A"}
+- Week-over-week: ${wow ? `Calls ${wow.calls_change_percent >= 0 ? "+" : ""}${wow.calls_change_percent}% vs last week (${wow.calls_this_week} vs ${wow.calls_last_week})` : "N/A"}`;
 
   try {
     const raw = await llm.chat({
