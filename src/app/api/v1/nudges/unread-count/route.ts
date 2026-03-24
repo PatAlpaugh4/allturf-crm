@@ -15,12 +15,17 @@ export const GET = withApiProtection(async (request: Request) => {
     }
 
     const supabase = createServiceClient();
-    const { count, error } = await supabase
+    let query = supabase
       .from("rep_nudges")
       .select("id", { count: "exact", head: true })
-      .eq("rep_id", repId)
       .eq("is_dismissed", false)
       .eq("is_completed", false);
+
+    if (repId !== "all") {
+      query = query.eq("rep_id", repId);
+    }
+
+    const { count, error } = await query;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

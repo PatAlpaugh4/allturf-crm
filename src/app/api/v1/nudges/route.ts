@@ -26,9 +26,13 @@ export const GET = withApiProtection(async (request: Request) => {
          call_log:call_logs(id, created_at)`,
         { count: "exact" }
       )
-      .eq("rep_id", repId)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
+
+    // Admins passing "all" as rep_id see all nudges; otherwise filter by rep
+    if (repId !== "all") {
+      query = query.eq("rep_id", repId);
+    }
 
     // Status filter
     if (status === "active" || !status) {

@@ -59,7 +59,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export function NudgeBell() {
-  const { profile } = useAuth();
+  const { profile, isAdmin } = useAuth();
   const supabase = createBrowserClient();
   const [count, setCount] = useState(0);
   const [nudges, setNudges] = useState<NudgePreview[]>([]);
@@ -68,33 +68,35 @@ export function NudgeBell() {
 
   const fetchCount = useCallback(async () => {
     if (!profile?.id) return;
-    const { count: total } = await supabase
+    let query = supabase
       .from("rep_nudges")
       .select("id", { count: "exact", head: true })
-      .eq("rep_id", profile.id)
       .eq("is_dismissed", false)
       .eq("is_completed", false);
+    if (!isAdmin) query = query.eq("rep_id", profile.id);
 
+    const { count: total } = await query;
     setCount(total || 0);
-  }, [profile?.id, supabase]);
+  }, [profile?.id, isAdmin, supabase]);
 
   const fetchNudges = useCallback(async () => {
     if (!profile?.id) return;
-    const { data } = await supabase
+    let query = supabase
       .from("rep_nudges")
       .select(
         `id, nudge_type, priority, title, message, created_at,
          company:companies(id, name)`
       )
-      .eq("rep_id", profile.id)
       .eq("is_dismissed", false)
       .eq("is_completed", false)
       .order("created_at", { ascending: false })
       .limit(3);
+    if (!isAdmin) query = query.eq("rep_id", profile.id);
 
+    const { data } = await query;
     setNudges((data as unknown as NudgePreview[]) || []);
     setLoaded(true);
-  }, [profile?.id, supabase]);
+  }, [profile?.id, isAdmin, supabase]);
 
   useEffect(() => {
     fetchCount();

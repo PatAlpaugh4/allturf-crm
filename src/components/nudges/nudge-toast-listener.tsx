@@ -32,7 +32,7 @@ const PRIORITY_DOT: Record<string, string> = {
 };
 
 export function NudgeToastListener() {
-  const { profile } = useAuth();
+  const { profile, isAdmin } = useAuth();
   const router = useRouter();
   const supabase = createBrowserClient();
   const seenIdsRef = useRef(new Set<string>());
@@ -75,15 +75,17 @@ export function NudgeToastListener() {
   const pollForNewNudges = useCallback(async () => {
     if (!profile?.id) return;
 
-    const { data } = await supabase
+    let query = supabase
       .from("rep_nudges")
       .select("id, nudge_type, priority, title, message, company_id, contact_id")
-      .eq("rep_id", profile.id)
       .eq("is_dismissed", false)
       .eq("is_completed", false)
       .gt("created_at", lastCheckRef.current)
       .order("created_at", { ascending: true })
       .limit(5);
+    if (!isAdmin) query = query.eq("rep_id", profile.id);
+
+    const { data } = await query;
 
     lastCheckRef.current = new Date().toISOString();
 
@@ -95,22 +97,21 @@ export function NudgeToastListener() {
         }, i * 1500);
       }
     }
-  }, [profile?.id, supabase, showNudgeToast]);
+  }, [profile?.id, isAdmin, supabase, showNudgeToast]);
 
   useEffect(() => {
     if (!profile?.id) return;
 
     // Try Supabase Realtime first
+    const realtimeFilter = isAdmin
+      ? { event: "INSERT" as const, schema: "public", table: "rep_nudges" }
+      : { event: "INSERT" as const, schema: "public", table: "rep_nudges", filter: `rep_id=eq.${profile.id}` };
+
     const channel = supabase
       .channel("nudge-toasts")
       .on(
         "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "rep_nudges",
-          filter: `rep_id=eq.${profile.id}`,
-        },
+        realtimeFilter,
         (payload) => {
           const nudge = payload.new as RealtimeNudge;
           showNudgeToast(nudge);
@@ -140,7 +141,7 @@ export function NudgeToastListener() {
       if (pollInterval) clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-  }, [profile?.id, supabase, showNudgeToast, pollForNewNudges]);
+  }, [profile?.id, isAdmin, supabase, showNudgeToast, pollForNewNudges]);
 
   // Keep seen IDs from growing unbounded
   useEffect(() => {

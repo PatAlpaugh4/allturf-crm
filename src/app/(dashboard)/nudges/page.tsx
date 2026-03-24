@@ -87,7 +87,7 @@ function getDateGroup(dateStr: string): string {
 }
 
 export default function NudgesPage() {
-  const { profile } = useAuth();
+  const { profile, isAdmin } = useAuth();
   const supabase = createBrowserClient();
   const [nudges, setNudges] = useState<NudgeRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,9 +103,10 @@ export default function NudgesPage() {
         `*, company:companies(id, name),
          contact:contacts(id, first_name, last_name)`
       )
-      .eq("rep_id", profile.id)
       .order("created_at", { ascending: false })
       .limit(100);
+
+    if (!isAdmin) query = query.eq("rep_id", profile.id);
 
     if (!showDismissed) {
       query = query.eq("is_dismissed", false).eq("is_completed", false);
@@ -114,7 +115,7 @@ export default function NudgesPage() {
     const { data } = await query;
     setNudges((data as unknown as NudgeRow[]) || []);
     setLoading(false);
-  }, [profile?.id, supabase, showDismissed]);
+  }, [profile?.id, isAdmin, supabase, showDismissed]);
 
   useEffect(() => {
     fetchNudges();
