@@ -203,9 +203,13 @@ export default function DigestPage() {
 
   // Extract structured data (new format) or fall back — guard against old flat-array format
   const structured = (() => {
-    const val = digest?.rep_activity_breakdown;
-    if (val != null && typeof val === "object" && !Array.isArray(val) && "executive_summary" in val) {
-      return val as DigestStructuredData;
+    try {
+      const val = digest?.rep_activity_breakdown;
+      if (val != null && typeof val === "object" && !Array.isArray(val) && "executive_summary" in val) {
+        return val as DigestStructuredData;
+      }
+    } catch {
+      // Malformed data — treat as no structured data
     }
     return null;
   })();
