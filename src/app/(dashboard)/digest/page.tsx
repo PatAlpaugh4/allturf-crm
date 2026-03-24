@@ -91,7 +91,7 @@ function formatDateStr(dateStr: string): string {
 }
 
 export default function DigestPage() {
-  const supabase = createBrowserClient();
+  const [supabase] = useState(() => createBrowserClient());
   const { isAdmin } = useAuth();
 
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -153,7 +153,6 @@ export default function DigestPage() {
 
     setTrends((signalsData as TrendSignal[]) || []);
     setLoading(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, supabase]);
 
   useEffect(() => {
