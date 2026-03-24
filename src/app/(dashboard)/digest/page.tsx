@@ -117,35 +117,40 @@ export default function DigestPage() {
     setLoading(true);
     setDigest(null);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const authHeaders: Record<string, string> = {};
-    if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const authHeaders: Record<string, string> = {};
+      if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
 
-    const fallbackParam = isInitialLoad.current ? "&fallback=latest" : "";
-    const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}${fallbackParam}`, { headers: authHeaders });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.digest) {
-        setDigest(data.digest);
-        // Sync selectedDate if API returned a different date (latest fallback)
-        if (data.digest.digest_date && data.digest.digest_date !== selectedDate) {
-          skipNextFetch.current = true;
-          setSelectedDate(data.digest.digest_date);
+      const fallbackParam = isInitialLoad.current ? "&fallback=latest" : "";
+      const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}${fallbackParam}`, { headers: authHeaders });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.digest) {
+          setDigest(data.digest);
+          // Sync selectedDate if API returned a different date (latest fallback)
+          if (data.digest.digest_date && data.digest.digest_date !== selectedDate) {
+            skipNextFetch.current = true;
+            setSelectedDate(data.digest.digest_date);
+          }
         }
       }
+
+      // Fetch trend signals
+      const { data: signalsData } = await supabase
+        .from("field_trend_signals")
+        .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
+        .eq("is_active", true)
+        .order("severity", { ascending: false })
+        .limit(10);
+
+      setTrends((signalsData as TrendSignal[]) || []);
+    } catch (err) {
+      console.error("Failed to fetch digest:", err);
+    } finally {
+      setLoading(false);
+      isInitialLoad.current = false;
     }
-
-    // Fetch trend signals
-    const { data: signalsData } = await supabase
-      .from("field_trend_signals")
-      .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
-      .eq("is_active", true)
-      .order("severity", { ascending: false })
-      .limit(10);
-
-    setTrends((signalsData as TrendSignal[]) || []);
-    setLoading(false);
-    isInitialLoad.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate]);
 
