@@ -101,21 +101,19 @@ export default function DigestPage() {
   });
 
   const isInitialLoad = useRef(true);
-  const skipNextFetch = useRef(false);
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
   const fetchDigest = useCallback(async () => {
-    // Skip redundant re-fetch after initial fallback syncs selectedDate
-    if (skipNextFetch.current) {
-      skipNextFetch.current = false;
-      return;
-    }
-
     setLoading(true);
     setDigest(null);
+    setFetchError(null);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -123,31 +121,51 @@ export default function DigestPage() {
       if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
 
       const fallbackParam = isInitialLoad.current ? "&fallback=latest" : "";
-      const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}${fallbackParam}`, { headers: authHeaders });
+      const res = await fetch(
+        `/api/turf/daily-digest?date=${selectedDate}${fallbackParam}`,
+        { headers: authHeaders, signal: controller.signal },
+      );
+
       if (res.ok) {
         const data = await res.json();
         if (data.digest) {
           setDigest(data.digest);
           // Sync selectedDate if API returned a different date (latest fallback)
-          if (data.digest.digest_date && data.digest.digest_date !== selectedDate) {
-            skipNextFetch.current = true;
+          if (
+            isInitialLoad.current &&
+            data.digest.digest_date &&
+            data.digest.digest_date !== selectedDate
+          ) {
             setSelectedDate(data.digest.digest_date);
           }
         }
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setFetchError(body.error || `API error ${res.status}`);
       }
 
-      // Fetch trend signals
-      const { data: signalsData } = await supabase
-        .from("field_trend_signals")
-        .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
-        .eq("is_active", true)
-        .order("severity", { ascending: false })
-        .limit(10);
+      // Fetch trend signals (separate try so a failure here doesn't block digest display)
+      try {
+        const { data: signalsData } = await supabase
+          .from("field_trend_signals")
+          .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
+          .eq("is_active", true)
+          .order("severity", { ascending: false })
+          .limit(10);
 
-      setTrends((signalsData as TrendSignal[]) || []);
+        setTrends((signalsData as TrendSignal[]) || []);
+      } catch {
+        // Trend signals are non-critical — don't block the page
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setFetchError("Request timed out — please try again");
+      } else {
+        setFetchError(err instanceof Error ? err.message : "Failed to load digest");
+      }
       console.error("Failed to fetch digest:", err);
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
       isInitialLoad.current = false;
     }
@@ -286,15 +304,29 @@ export default function DigestPage() {
       {!loading && !digest && (
         <Card className="border-0 shadow-[var(--shadow-elevated)]">
           <CardContent className="flex flex-col items-center justify-center py-20 gap-4">
-            <div className="h-16 w-16 rounded-full bg-primary/[0.06] flex items-center justify-center">
-              <Sparkles className="h-8 w-8 text-primary/40" />
+            <div className={cn(
+              "h-16 w-16 rounded-full flex items-center justify-center",
+              fetchError ? "bg-rose-100 dark:bg-rose-900/30" : "bg-primary/[0.06]"
+            )}>
+              {fetchError ? (
+                <AlertTriangle className="h-8 w-8 text-rose-500" />
+              ) : (
+                <Sparkles className="h-8 w-8 text-primary/40" />
+              )}
             </div>
             <div className="text-center">
-              <p className="font-medium">No digest available</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {formatDateStr(selectedDate)}
-              </p>
+              <p className="font-medium">{fetchError ? "Failed to load digest" : "No digest available"}</p>
+              {fetchError ? (
+                <p className="text-sm text-rose-600 dark:text-rose-400 mt-1 max-w-md">{fetchError}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground mt-1">{formatDateStr(selectedDate)}</p>
+              )}
             </div>
+            {fetchError && (
+              <Button onClick={fetchDigest} className="min-h-[44px] gap-2">
+                Try Again
+              </Button>
+            )}
             {isAdmin && (
               <Button onClick={handleGenerate} disabled={generating} className="min-h-[44px] gap-2">
                 {generating ? (
