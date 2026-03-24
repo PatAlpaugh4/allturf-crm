@@ -36,7 +36,7 @@ export function createServerClient(cookieStore: {
 
 // Service role client — for admin operations (bypasses RLS)
 export function createServiceClient() {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.replace(/\s+/g, "");
   if (!serviceRoleKey) {
     throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY environment variable");
   }
