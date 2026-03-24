@@ -101,12 +101,19 @@ export default function DigestPage() {
   });
 
   const isInitialLoad = useRef(true);
+  const skipNextFetch = useRef(false);
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 
   const fetchDigest = useCallback(async () => {
+    // Skip redundant re-fetch after initial fallback syncs selectedDate
+    if (skipNextFetch.current) {
+      skipNextFetch.current = false;
+      return;
+    }
+
     setLoading(true);
     setDigest(null);
 
@@ -122,6 +129,7 @@ export default function DigestPage() {
         setDigest(data.digest);
         // Sync selectedDate if API returned a different date (latest fallback)
         if (data.digest.digest_date && data.digest.digest_date !== selectedDate) {
+          skipNextFetch.current = true;
           setSelectedDate(data.digest.digest_date);
         }
       }
