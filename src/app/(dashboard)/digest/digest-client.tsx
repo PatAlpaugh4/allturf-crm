@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -100,14 +100,15 @@ export default function DigestPage() {
     return d.toISOString().split("T")[0];
   });
 
-  const isInitialLoad = useRef(true);
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
-  const fetchDigest = useCallback(async () => {
+  // Fetch digest for a specific date — no dependency on selectedDate state
+  const doFetch = useCallback(async (date: string, withFallback: boolean) => {
     setLoading(true);
     setDigest(null);
     setFetchError(null);
@@ -120,9 +121,9 @@ export default function DigestPage() {
       const authHeaders: Record<string, string> = {};
       if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
 
-      const fallbackParam = isInitialLoad.current ? "&fallback=latest" : "";
+      const fallbackParam = withFallback ? "&fallback=latest" : "";
       const res = await fetch(
-        `/api/turf/daily-digest?date=${selectedDate}${fallbackParam}`,
+        `/api/turf/daily-digest?date=${date}${fallbackParam}`,
         { headers: authHeaders, signal: controller.signal },
       );
 
@@ -130,12 +131,8 @@ export default function DigestPage() {
         const data = await res.json();
         if (data.digest) {
           setDigest(data.digest);
-          // Sync selectedDate if API returned a different date (latest fallback)
-          if (
-            isInitialLoad.current &&
-            data.digest.digest_date &&
-            data.digest.digest_date !== selectedDate
-          ) {
+          // Sync date picker to match returned digest (e.g. latest fallback)
+          if (data.digest.digest_date && data.digest.digest_date !== date) {
             setSelectedDate(data.digest.digest_date);
           }
         }
@@ -167,16 +164,22 @@ export default function DigestPage() {
     } finally {
       clearTimeout(timeout);
       setLoading(false);
-      isInitialLoad.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDate]);
+  }, []);
 
+  // Initial fetch only — with fallback to latest digest
   useEffect(() => {
-    fetchDigest();
-  }, [fetchDigest]);
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    doFetch(d.toISOString().split("T")[0], true);
+  }, [doFetch]);
 
-  const [generateError, setGenerateError] = useState<string | null>(null);
+  // User-driven date change — fetch without fallback
+  const changeDate = useCallback((newDate: string) => {
+    setSelectedDate(newDate);
+    doFetch(newDate, false);
+  }, [doFetch]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -193,7 +196,7 @@ export default function DigestPage() {
         body: JSON.stringify({ digest_date: selectedDate }),
       });
       if (res.ok) {
-        await fetchDigest();
+        doFetch(selectedDate, false);
       } else {
         const data = await res.json().catch(() => ({}));
         setGenerateError(data.error || `Generation failed (${res.status})`);
@@ -216,7 +219,7 @@ export default function DigestPage() {
   const navigateDate = (direction: -1 | 1) => {
     const d = new Date(selectedDate + "T12:00:00Z");
     d.setDate(d.getDate() + direction);
-    setSelectedDate(d.toISOString().split("T")[0]);
+    changeDate(d.toISOString().split("T")[0]);
   };
 
   // Extract structured data (new format) or fall back — guard against old flat-array format
@@ -253,7 +256,7 @@ export default function DigestPage() {
               <input
                 type="date"
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => changeDate(e.target.value)}
                 className="bg-transparent border-none outline-none text-sm w-[130px]"
               />
             </div>
@@ -323,7 +326,7 @@ export default function DigestPage() {
               )}
             </div>
             {fetchError && (
-              <Button onClick={fetchDigest} className="min-h-[44px] gap-2">
+              <Button onClick={() => doFetch(selectedDate, false)} className="min-h-[44px] gap-2">
                 Try Again
               </Button>
             )}
