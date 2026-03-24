@@ -56,6 +56,7 @@ export const GET = withApiProtection(async (request: Request) => {
       );
     }
 
+    const fallback = searchParams.get("fallback");
     const supabase = createServiceClient();
     let { data: digest } = await supabase
       .from("daily_digests")
@@ -63,8 +64,8 @@ export const GET = withApiProtection(async (request: Request) => {
       .eq("digest_date", dateStr)
       .maybeSingle();
 
-    // If no digest for requested date, return the most recent one
-    if (!digest) {
+    // Only fall back to latest digest when explicitly requested (initial page load)
+    if (!digest && fallback === "latest") {
       const { data: latest } = await supabase
         .from("daily_digests")
         .select("*")

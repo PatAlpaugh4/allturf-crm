@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -100,6 +100,7 @@ export default function DigestPage() {
     return d.toISOString().split("T")[0];
   });
 
+  const isInitialLoad = useRef(true);
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,7 +114,8 @@ export default function DigestPage() {
     const authHeaders: Record<string, string> = {};
     if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
 
-    const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}`, { headers: authHeaders });
+    const fallbackParam = isInitialLoad.current ? "&fallback=latest" : "";
+    const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}${fallbackParam}`, { headers: authHeaders });
     if (res.ok) {
       const data = await res.json();
       if (data.digest) {
@@ -135,6 +137,7 @@ export default function DigestPage() {
 
     setTrends((signalsData as TrendSignal[]) || []);
     setLoading(false);
+    isInitialLoad.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate]);
 
