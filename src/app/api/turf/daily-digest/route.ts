@@ -57,17 +57,24 @@ export const GET = withApiProtection(async (request: Request) => {
     }
 
     const supabase = createServiceClient();
-    const { data: digest, error } = await supabase
+    let { data: digest } = await supabase
       .from("daily_digests")
       .select("*")
       .eq("digest_date", dateStr)
-      .single();
+      .maybeSingle();
 
-    if (error || !digest) {
-      return NextResponse.json({ digest: null });
+    // If no digest for requested date, return the most recent one
+    if (!digest) {
+      const { data: latest } = await supabase
+        .from("daily_digests")
+        .select("*")
+        .order("digest_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      digest = latest;
     }
 
-    return NextResponse.json({ digest });
+    return NextResponse.json({ digest: digest || null });
   } catch {
     return NextResponse.json(
       { error: "Failed to retrieve digest." },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -91,7 +91,7 @@ function formatDateStr(dateStr: string): string {
 }
 
 export default function DigestPage() {
-  const [supabase] = useState(() => createBrowserClient());
+  const supabase = createBrowserClient();
   const { isAdmin } = useAuth();
 
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -104,7 +104,6 @@ export default function DigestPage() {
   const [trends, setTrends] = useState<TrendSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const userChangedDateRef = useRef(false);
 
   const fetchDigest = useCallback(async () => {
     setLoading(true);
@@ -113,37 +112,20 @@ export default function DigestPage() {
     const { data: { session } } = await supabase.auth.getSession();
     const authHeaders: Record<string, string> = {};
     if (session?.access_token) authHeaders["Authorization"] = `Bearer ${session.access_token}`;
+
     const res = await fetch(`/api/turf/daily-digest?date=${selectedDate}`, { headers: authHeaders });
-    let foundDigest = false;
     if (res.ok) {
       const data = await res.json();
       if (data.digest) {
         setDigest(data.digest);
-        foundDigest = true;
-      }
-    }
-
-    // If no digest for selected date and user hasn't manually changed dates,
-    // fall back to the most recent available digest
-    if (!foundDigest && !userChangedDateRef.current) {
-      try {
-        const { data: latestDigest } = await supabase
-          .from("daily_digests")
-          .select("digest_date")
-          .order("digest_date", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (latestDigest && latestDigest.digest_date !== selectedDate) {
-          setSelectedDate(latestDigest.digest_date);
-          setLoading(false);
-          return; // Will re-fetch via the selectedDate effect
+        // Sync selectedDate if API returned a different date (latest fallback)
+        if (data.digest.digest_date && data.digest.digest_date !== selectedDate) {
+          setSelectedDate(data.digest.digest_date);
         }
-      } catch {
-        // Fallback query failed — continue showing empty state
       }
     }
 
+    // Fetch trend signals
     const { data: signalsData } = await supabase
       .from("field_trend_signals")
       .select("id, signal_type, severity, title, description, data_points, is_active, recommended_actions")
@@ -153,7 +135,8 @@ export default function DigestPage() {
 
     setTrends((signalsData as TrendSignal[]) || []);
     setLoading(false);
-  }, [selectedDate, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate]);
 
   useEffect(() => {
     fetchDigest();
@@ -197,7 +180,6 @@ export default function DigestPage() {
   };
 
   const navigateDate = (direction: -1 | 1) => {
-    userChangedDateRef.current = true;
     const d = new Date(selectedDate + "T12:00:00Z");
     d.setDate(d.getDate() + direction);
     setSelectedDate(d.toISOString().split("T")[0]);
@@ -233,7 +215,7 @@ export default function DigestPage() {
               <input
                 type="date"
                 value={selectedDate}
-                onChange={(e) => { userChangedDateRef.current = true; setSelectedDate(e.target.value); }}
+                onChange={(e) => setSelectedDate(e.target.value)}
                 className="bg-transparent border-none outline-none text-sm w-[130px]"
               />
             </div>
